@@ -569,3 +569,337 @@ GSEM_generator_Sensitivity = function( n, p, d =2, var_Min = 1, var_Max = 1, dis
   # }
   return( DAGsamples)
 }
+
+## ============================================================
+## Contaminated Causal Linear SEM (CCLSM) data generator helpers
+## ------------------------------------------------------------
+## CCLSM_generate:  generate contaminated observations for a
+## pre-specified adjacency matrix B.
+## CCLSM_generator: sample a random graph via Graph_Generator and
+## delegate to CCLSM_generate so existing pipelines can call it with
+## the same arguments as LTS_GSEM_generator.
+## ============================================================
+
+#' Compute a topological ordering for a DAG adjacency matrix.
+#'
+#' @param B Weighted adjacency matrix where `B[j, k]` denotes the edge
+#'   weight from parent `k` to child `j`.
+#' @return Integer vector giving a topological ordering of the nodes.
+compute_topological_order <- function(B) {
+  if (!is.matrix(B)) {
+    stop("B must be a matrix")
+  }
+  p <- nrow(B)
+  in_degree <- rowSums(B != 0)
+  children <- lapply(seq_len(p), function(parent) which(B[, parent] != 0))
+
+  order <- integer(0)
+  queue <- which(in_degree == 0)
+
+  while (length(queue) > 0) {
+    node <- queue[1]
+    queue <- queue[-1]
+    order <- c(order, node)
+
+    for (child in children[[node]]) {
+      in_degree[child] <- in_degree[child] - 1
+      if (in_degree[child] == 0) {
+        queue <- c(queue, child)
+      }
+    }
+  }
+
+  if (length(order) != p) {
+    stop("B must represent a DAG (acyclic matrix required)")
+  }
+
+  order
+}
+
+#' Generate contaminated SEM data for a fixed graph with structural propagation
+#'
+#' The contamination mask replaces affected entries with extreme values after
+#' the clean signal has been generated. Because each node is simulated in
+#' topological order, outliers propagate naturally to descendants through the
+#' recursive structural equations.
+#'
+#' @inheritParams compute_topological_order
+#' @param n Number of samples.
+#' @param var_min,var_max Range for node-specific noise standard deviations.
+#' @param outlier_nodes Vector of node indices to contaminate.
+#' @param b Number of contaminated cells per node (scalar or length(outlier_nodes)).
+#' @param overlap_mode Overlap pattern between contaminated nodes.
+#' @param overlap_fraction Shared-outlier ratio used when `overlap_mode = "fraction"`.
+#' @param union_rows Candidate row indices when `overlap_mode = "custom_union"`.
+#' @param Y_custom Custom contamination mask when `overlap_mode = "custom_mask"`.
+#' @param ensure_disjoint_rest Avoid additional overlap outside the shared block.
+#' @param dist Distribution for contaminated entries.
+#' @param out_mean,out_scale Parameters for the contamination distribution.
+#' @param seed RNG seed.
+#'
+#' @return A list containing contaminated observations `x`, clean data
+#'   `X_clean`, contamination mask `Y`, and summary statistics.
+CCLSM_generate <- function(
+    n,
+    B,
+    var_min = 1,
+    var_max = 1,
+    outlier_nodes = NULL,
+    b = 0,
+    overlap_mode = c("independent", "shared", "fraction", "custom_union", "custom_mask"),
+    overlap_fraction = 0,
+    union_rows = NULL,
+    Y_custom = NULL,
+    ensure_disjoint_rest = TRUE,
+    dist = c("Gaussian", "t", "Laplace", "Uniform"),
+    out_mean = 1e3,
+    out_scale = 1,
+    seed = 1
+) {
+  set.seed(seed)
+  overlap_mode <- match.arg(overlap_mode)
+  dist <- match.arg(dist)
+
+  if (!is.matrix(B)) {
+    stop("B must be a matrix")
+  }
+  p <- ncol(B)
+
+  ## ---------- (0) Utility helpers ----------
+  rlaplace <- function(m, loc = 0, scale = 1) {
+    u <- runif(m, -0.5, 0.5)
+    loc - scale * sign(u) * log(1 - 2 * abs(u))
+  }
+  gen_outliers <- function(m) {
+    switch(
+      dist,
+      "Gaussian" = rnorm(m, mean = out_mean, sd = out_scale),
+      "t" = out_mean + out_scale * rt(m, df = 3),
+      "Laplace" = rlaplace(m, loc = out_mean, scale = out_scale),
+      "Uniform" = runif(m, min = out_mean - out_scale, max = out_mean + out_scale)
+    )
+  }
+
+  ## ---------- (1) Contamination mask Y ----------
+  Y <- matrix(0L, n, p)
+  if (overlap_mode == "custom_mask") {
+    if (is.null(Y_custom)) {
+      stop("Provide Y_custom for custom_mask mode")
+    }
+    if (!all(dim(Y_custom) == c(n, p))) {
+      stop("Y_custom must be n x p")
+    }
+    if (!all(Y_custom %in% c(0, 1))) {
+      stop("Y_custom must be 0/1")
+    }
+    Y <- Y_custom
+  } else if (!is.null(outlier_nodes) && length(outlier_nodes) > 0) {
+    if (!is.numeric(b)) {
+      stop("b must be numeric")
+    }
+    if (length(b) == 1L) {
+      b <- rep(b, length(outlier_nodes))
+    }
+    if (length(b) != length(outlier_nodes)) {
+      stop("length(b) must equal length(outlier_nodes) or be scalar")
+    }
+    if (any(b > n)) {
+      stop("b cannot exceed n")
+    }
+
+    if (overlap_mode == "independent") {
+      for (idx in seq_along(outlier_nodes)) {
+        k <- outlier_nodes[idx]
+        bk <- b[idx]
+        if (bk > 0) {
+          Y[sample.int(n, bk), k] <- 1L
+        }
+      }
+    } else if (overlap_mode == "shared") {
+      b_shared <- min(b)
+      shared_rows <- if (b_shared > 0) sample.int(n, b_shared) else integer(0)
+      for (k in outlier_nodes) {
+        if (length(shared_rows)) {
+          Y[shared_rows, k] <- 1L
+        }
+      }
+      for (idx in seq_along(outlier_nodes)) {
+        k <- outlier_nodes[idx]
+        extra <- b[idx] - b_shared
+        if (extra > 0) {
+          rest <- setdiff(seq_len(n), shared_rows)
+          if (length(rest) >= extra) {
+            Y[sample(rest, extra), k] <- 1L
+          }
+        }
+      }
+    } else if (overlap_mode == "fraction") {
+      if (overlap_fraction < 0 || overlap_fraction > 1) {
+        stop("overlap_fraction must be in [0,1]")
+      }
+      base_b <- min(b)
+      b_shared <- round(overlap_fraction * base_b)
+      shared_rows <- if (b_shared > 0) sample.int(n, b_shared) else integer(0)
+      for (k in outlier_nodes) {
+        if (length(shared_rows)) {
+          Y[shared_rows, k] <- 1L
+        }
+      }
+      for (idx in seq_along(outlier_nodes)) {
+        k <- outlier_nodes[idx]
+        need <- b[idx] - b_shared
+        if (need > 0) {
+          if (ensure_disjoint_rest) {
+            already <- which(rowSums(Y) > 0)
+            candidates <- setdiff(seq_len(n), union(shared_rows, already))
+            take <- min(length(candidates), need)
+            sel <- if (take > 0) sample(candidates, take) else integer(0)
+            if (length(sel)) {
+              Y[sel, k] <- 1L
+            }
+            remaining <- need - take
+            if (remaining > 0) {
+              rest <- setdiff(seq_len(n), c(shared_rows, sel))
+              if (length(rest) >= remaining) {
+                Y[sample(rest, remaining), k] <- 1L
+              }
+            }
+          } else {
+            rest <- setdiff(seq_len(n), shared_rows)
+            if (length(rest) >= need) {
+              Y[sample(rest, need), k] <- 1L
+            }
+          }
+        }
+      }
+    } else if (overlap_mode == "custom_union") {
+      if (is.null(union_rows)) {
+        stop("Provide union_rows for custom_union mode")
+      }
+      union_rows <- sort(unique(union_rows))
+      if (!all(union_rows %in% seq_len(n))) {
+        stop("union_rows out of range 1..n")
+      }
+      for (idx in seq_along(outlier_nodes)) {
+        k <- outlier_nodes[idx]
+        bk <- b[idx]
+        if (bk > length(union_rows)) {
+          stop("b cannot exceed length(union_rows)")
+        }
+        if (bk > 0) {
+          Y[sample(union_rows, bk), k] <- 1L
+        }
+      }
+    }
+  }
+
+  ## ---------- (2) Noise scales & topological order ----------
+  noise_sd <- runif(p, min = var_min, max = var_max)
+  topo <- compute_topological_order(B)
+
+  ## ---------- (3) Structural propagation ----------
+  Z <- matrix(0, n, p)
+  Z_clean <- matrix(0, n, p)
+  for (j in topo) {
+    parents <- which(B[j, ] != 0)
+    mu <- if (length(parents) == 0) {
+      0
+    } else {
+      Z[, parents, drop = FALSE] %*% B[j, parents]
+    }
+    z_j <- rnorm(n, mean = as.vector(mu), sd = noise_sd[j])
+    z_clean <- z_j
+
+    rows_j <- which(Y[, j] == 1L)
+    if (length(rows_j) > 0) {
+      z_j[rows_j] <- gen_outliers(length(rows_j))
+    }
+
+    Z[, j] <- z_j
+    Z_clean[, j] <- z_clean
+  }
+
+  ## ---------- (4) Summary ----------
+  per_node <- colSums(Y)
+  per_row <- rowSums(Y)
+  union_size <- sum(per_row > 0)
+
+  summary <- list(
+    per_node = per_node,
+    per_row = per_row,
+    union_size = union_size,
+    overlap_mode = overlap_mode,
+    overlap_fraction = overlap_fraction,
+    propagate = TRUE
+  )
+
+  list(
+    x = as.data.frame(Z),
+    X_clean = as.data.frame(Z_clean),
+    Y = Y,
+    y = Y,
+    true_Matrix = B,
+    summary = summary,
+    noise_sd = noise_sd
+  )
+}
+
+#' Wrapper to mimic LTS_GSEM_generator signature using CCLSM_generate
+#'
+#' This helper samples a DAG internally and returns a list compatible with
+#' downstream scripts that previously consumed LTS_GSEM_generator outputs.
+CCLSM_generator <- function(
+    n,
+    p,
+    d = 2,
+    b = 0,
+    outlier_nodes = NULL,
+    var_Min = 1,
+    var_Max = 1,
+    dist = "Gaussian",
+    beta_min,
+    beta_max,
+    graph_type,
+    q = 0.025,
+    h = 1,
+    structure = NULL,
+    seed = 1,
+    overlap_mode = "independent",
+    overlap_fraction = 0,
+    union_rows = NULL,
+    Y_custom = NULL,
+    ensure_disjoint_rest = TRUE,
+    out_mean = 1e3,
+    out_scale = 1
+) {
+  graph <- Graph_Generator(p, d, graph_type, beta_min, beta_max, q, h, seed = seed, structure)$B
+  generated <- CCLSM_generate(
+    n = n,
+    B = graph,
+    var_min = var_Min,
+    var_max = var_Max,
+    outlier_nodes = outlier_nodes,
+    b = b,
+    overlap_mode = overlap_mode,
+    overlap_fraction = overlap_fraction,
+    union_rows = union_rows,
+    Y_custom = Y_custom,
+    ensure_disjoint_rest = ensure_disjoint_rest,
+    dist = dist,
+    out_mean = out_mean,
+    out_scale = out_scale,
+    seed = seed
+  )
+
+  list(
+    x = generated$x,
+    true_Matrix = graph,
+    Y = generated$Y,
+    y = generated$y,
+    X_clean = generated$X_clean,
+    summary = generated$summary,
+    noise_sd = generated$noise_sd
+  )
+}
+
+
