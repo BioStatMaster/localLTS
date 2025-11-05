@@ -501,6 +501,9 @@ construct_output_filename <- function(prefix, combo, num_out) {
       num_out
     )
   }
+  metrics <- metrics[intersect(names(metrics), metric_names)]
+  template[names(metrics)] <- as.numeric(metrics)
+  template
 }
 
 #' Persist algorithm-specific results to disk.
@@ -583,6 +586,12 @@ resolve_spec <- function(spec, combo) {
   } else {
     spec
   }
+  metrics <- lapply(sim_results, function(res) {
+    df <- res$evaluations
+    df$seed <- res$seed
+    df
+  })
+  do.call(rbind, metrics)
 }
 
 #' Collapse node-wise contamination counts to a single scalar for naming.
