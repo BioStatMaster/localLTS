@@ -1,6 +1,12 @@
-library(rstudioapi)
-install.packages("languageserver")
-path <-setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+path <- getwd()
+if (interactive() && requireNamespace("rstudioapi", quietly = TRUE)) {
+  try({
+    path <- setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+  }, silent = TRUE)
+}
+if (interactive() && !requireNamespace("languageserver", quietly = TRUE)) {
+  install.packages("languageserver")
+}
 ## ============================================================
 ## CCLSM Generator with Overlap Controls (B 입력 필수)
 ## ============================================================
@@ -163,6 +169,82 @@ CCLSM_generate <- function(
       per_row    = per_row,
       union_size = union_size
     )
+  )
+}
+
+#' CCLSM generator wrapper with internal graph sampling
+#'
+#' 기존의 ``LTS_GSEM_generator``와 동일하게 그래프를 내부에서 생성한 뒤
+#' `CCLSM_generate()`를 호출하여 데이터를 반환한다. 반환 형식 역시
+#' ``list(x=…, true_Matrix=…)`` 구조를 유지하여 기존 시뮬레이션 코드가
+#' 그대로 동작하도록 맞추었다.
+CCLSM_generator <- function(
+    n,
+    p,
+    d = 2,
+    b = 0,
+    outlier_nodes = NULL,
+    var_Min = 1,
+    var_Max = 1,
+    dist = "Gaussian",
+    beta_min,
+    beta_max,
+    graph_type,
+    q = 0.01,
+    h = 1,
+    structure = NULL,
+    seed = 1,
+    overlap_mode = c("independent","shared","fraction","custom_union","custom_mask"),
+    overlap_fraction = 0,
+    union_rows = NULL,
+    Y_custom = NULL,
+    ensure_disjoint_rest = TRUE,
+    out_mean = 1e3,
+    out_scale = 1
+){
+  overlap_mode <- match.arg(overlap_mode)
+
+  if (!exists("Graph_Generator", mode = "function")) {
+    stop("Graph_Generator() is not available. Source 'GaussianSEM/GSEM_generator(20190930).R' first.")
+  }
+
+  graph <- Graph_Generator(
+    p = p,
+    d = d,
+    graph_type = graph_type,
+    beta_min = beta_min,
+    beta_max = beta_max,
+    q = q,
+    h = h,
+    seed = seed,
+    structure = structure
+  )
+  B <- graph$B
+
+  gen <- CCLSM_generate(
+    n = n,
+    B = B,
+    var_min = var_Min,
+    var_max = var_Max,
+    outlier_nodes = outlier_nodes,
+    b = b,
+    overlap_mode = overlap_mode,
+    overlap_fraction = overlap_fraction,
+    union_rows = union_rows,
+    Y_custom = Y_custom,
+    ensure_disjoint_rest = ensure_disjoint_rest,
+    dist = dist,
+    out_mean = out_mean,
+    out_scale = out_scale,
+    seed = seed
+  )
+
+  list(
+    x = gen$Z,
+    true_Matrix = B,
+    Y = gen$Y,
+    X_clean = gen$X_clean,
+    summary = gen$summary
   )
 }
 
