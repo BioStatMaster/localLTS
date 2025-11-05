@@ -27,176 +27,38 @@ source("Evaluation_Algorithm(20181005).R")
 
 ############
 #### Packages ####
-if(!require(Rcpp)){
-  install.packages("Rcpp")
-  library(Rcpp)
-}
-if(!require(pcalg)){
-  install.packages("pcalg")
-  library(pcalg)
-}
-if(!require(MASS)){
-  install.packages("MASS")
-  library(MASS)
-}
-if(!require(gtools)){
-  install.packages("gtools")
-  library(gtools)
-}
-if(!require(graph)){
-  install.packages("graph")
-  library(graph)
-}
-if(!require(dplyr)){
-  install.packages("dplyr")
-  library(dplyr)
-}
-if(!require(plyr)){
-  install.packages("plyr")
-  library(plyr)
-}
-if(!require(future)){
-  install.packages("future")
-  library(future)
-}
-if(!require(future.apply)){
-  install.packages("future.apply")
-  library(future.apply)
-}
-if(!require(progressr)){
-  install.packages("progressr")
-  library(progressr)
-}
-if(!require(hypergeo)){
-  install.packages("hypergeo")
-  library(hypergeo)
-}
-if(!require(glmnet)){
-  install.packages("glmnet")
-  library(glmnet)
-}
-if(!require(gamlss)){
-  install.packages("gamlss")
-  library(gamlss)
-}
-if(!require(bnlearn)){
-  install.packages("bnlearn")
-  library(bnlearn)
-}
-library(compiler)
-if(!require(rmutil)){
-  install.packages("rmutil")
-  library(rmutil)
-}
-if(!require(CombMSC)){
-  install.packages("CombMSC")
-  library(CombMSC)
-}
-
-source("https://bioconductor.org/biocLite.R")
-if(!require(Rgraphviz)){
-  biocLite("Rgraphviz")
-  n
-  library(Rgraphviz)
-}
-if(!require(RBGL)){
-  biocLite("RBGL")
-  n
-  library(RBGL)
-}
-if(!require(graph)){
-  biocLite("graph")
-  n
-  library(graph)
-}
-
-#########################
-#### Data Generation ####
-########################
-
-#### Simulation Settings for Toy Example #####
-p = 20; n = 50; d = 1; seed = sample(1:100, 1);
-beta_min = 1.00; beta_max = 1.00;
-graph_type = 5
-alpha = 1* max( c( 1 - pnorm( n^(1/3)/2 ), 0.1^100 * 1 ) )
-
-outlier_node = 1
-b = 1
-synthetic_data <- CCLSM_generator(
-  n = n,
-  p = p,
-  d = d,
-  b = b,
-  outlier_nodes = outlier_node,
-  var_Min = 0.75,
-  var_Max = 0.75,
-  dist = "Gaussian",
-  beta_min = beta_min,
-  beta_max = beta_max,
-  graph_type = graph_type,
-  q = 0.025,
-  h = 1,
-  seed = seed
-)
-graph = synthetic_data$true_Matrix
-toy_data <- synthetic_data$x
-Y_mask = synthetic_data$y
-str(synthetic_data$summary)
-par(mfrow = c(3,1))
-
-colSums(graph!=0)
-
-boxplot(toy_data)
-barplot( sapply(toy_data, mean))
-barplot( sapply(toy_data, var))
-
-####### 단일 함수 기반 파이프라인 테스트 ########
-toy_simulation <- CCLSM_simulation_fun(
-  seed = seed,
-  n_real = n,
-  p_real = p,
-  d = d,
-  beta_min = beta_min,
-  beta_max = beta_max,
-  graph_type = graph_type,
-  b = b,
-  outlier_nodes = outlier_node,
-  h_ratio = 0.5,
-  thresh = 10,
-  gsem_alpha = alpha,
-  generator_output = synthetic_data,
-  save_data = TRUE
-)
-toy_metrics <- toy_simulation$evaluations
-print(head(toy_metrics))
-
-
-
-
-
-
-############# Future 기반 병렬 시뮬레이션 #################
-
-#' 시뮬레이션에서 사용할 평가 지표 이름 목록
-evaluation_metric_names <- c(
-  "precisition", "recall", "precisition_edge", "recall_edge",
-  "true_positives", "true_negatives", "false_positives", "false_negatives",
-  "true_positives_edge", "true_negatives_edge", "false_positives_edge", "false_negatives_edge",
-  "hamming_dist", "hamming_dist_edge", "hamming_dist_ordering",
-  "true_graph_total_edges", "estimated_graph_total_edges"
-)
-
-#' 초 단위 시간을 `HH:MM:SS.ss` 문자열로 변환한다.
-format_duration <- function(seconds) {
-  if (is.na(seconds) || is.infinite(seconds)) {
-    return("NA")
+#' Attempt to load an optional dependency without triggering installations.
+#'
+#' @param package Package name as a string.
+#' @param attach Whether to call `library()` when the package is available.
+load_optional_package <- function(package, attach = TRUE) {
+  if (requireNamespace(package, quietly = TRUE)) {
+    if (attach) {
+      library(package, character.only = TRUE)
+    }
+    TRUE
+  } else {
+    warning(sprintf("Package '%s' is not available. Related functionality may be skipped.", package))
+    FALSE
   }
-  seconds <- max(seconds, 0)
-  hrs <- floor(seconds / 3600)
-  mins <- floor((seconds %% 3600) / 60)
-  secs <- seconds %% 60
-  sprintf("%02d:%02d:%05.2f", hrs, mins, secs)
 }
+
+optional_packages <- c(
+  "Rcpp", "pcalg", "MASS", "gtools", "graph", "dplyr", "plyr", "future",
+  "future.apply", "progressr", "hypergeo", "glmnet", "gamlss", "bnlearn",
+  "rmutil", "CombMSC"
+)
+loaded_optional <- vapply(optional_packages, load_optional_package, logical(1))
+rm(loaded_optional, optional_packages)
+
+library(compiler)
+
+# Bioconductor packages are also optional; skip attempts to download in offline environments.
+load_optional_package("Rgraphviz")
+load_optional_package("RBGL")
+load_optional_package("graph")
+
+############# 공통 유틸리티 함수 #############
 
 #' 알고리즘 수행 결과에서 평가 지표 한 행을 생성한다.
 build_metric_row <- function(name, result) {
@@ -232,8 +94,35 @@ safe_algorithm_call <- function(expr) {
   })
 }
 
+#########################
+#### Data Generation ####
+########################
+
+############# Future 기반 병렬 시뮬레이션 #################
+
+#' 시뮬레이션에서 사용할 평가 지표 이름 목록
+evaluation_metric_names <- c(
+  "precisition", "recall", "precisition_edge", "recall_edge",
+  "true_positives", "true_negatives", "false_positives", "false_negatives",
+  "true_positives_edge", "true_negatives_edge", "false_positives_edge", "false_negatives_edge",
+  "hamming_dist", "hamming_dist_edge", "hamming_dist_ordering",
+  "true_graph_total_edges", "estimated_graph_total_edges"
+)
+
+#' 초 단위 시간을 `HH:MM:SS.ss` 문자열로 변환한다.
+format_duration <- function(seconds) {
+  if (is.na(seconds) || is.infinite(seconds)) {
+    return("NA")
+  }
+  seconds <- max(seconds, 0)
+  hrs <- floor(seconds / 3600)
+  mins <- floor((seconds %% 3600) / 60)
+  secs <- seconds %% 60
+  sprintf("%02d:%02d:%05.2f", hrs, mins, secs)
+}
+
 #' CCLSM 기반 데이터 생성과 알고리즘 평가를 한 번에 수행한다.
-#'
+#' 
 #' @param generator_output `CCLSM_generator()`가 반환한 결과. 제공되면
 #'   새로운 데이터를 생성하지 않고 이 객체를 그대로 사용한다.
 CCLSM_simulation_fun <- function(
@@ -423,7 +312,8 @@ run_parallel_CCLSM <- function(
     future::plan(future::sequential)
   }
 
-  progressr::handlers(global = TRUE, progressr::handler_progress(format = progress_format))
+  handler <- progressr::handler_progress(format = progress_format)
+  progressr::handlers(handler)
   start_time <- Sys.time()
 
   progressr::with_progress({
@@ -446,6 +336,68 @@ run_parallel_CCLSM <- function(
     }, future.seed = TRUE)
   })
 }
+
+# 데이터 생성 및 단일 시뮬레이션 예제 -----------------------------------------
+
+#### Simulation Settings for Toy Example #####
+p <- 20
+n <- 50
+d <- 1
+seed <- sample(1:100, 1)
+beta_min <- 1.00
+beta_max <- 1.00
+graph_type <- 5
+alpha <- max(c(1 - pnorm(n^(1/3) / 2), 0))
+
+outlier_node <- 1
+b <- 1
+synthetic_data <- CCLSM_generator(
+  n = n,
+  p = p,
+  d = d,
+  b = b,
+  outlier_nodes = outlier_node,
+  var_Min = 0.75,
+  var_Max = 0.75,
+  dist = "Gaussian",
+  beta_min = beta_min,
+  beta_max = beta_max,
+  graph_type = graph_type,
+  q = 0.025,
+  h = 1,
+  seed = seed
+)
+graph <- synthetic_data$true_Matrix
+toy_data <- synthetic_data$x
+Y_mask <- synthetic_data$y
+str(synthetic_data$summary)
+par(mfrow = c(3, 1))
+
+colSums(graph != 0)
+
+boxplot(toy_data)
+barplot(sapply(toy_data, mean))
+barplot(sapply(toy_data, var))
+
+####### 단일 함수 기반 파이프라인 테스트 ########
+toy_simulation <- CCLSM_simulation_fun(
+  seed = seed,
+  n_real = n,
+  p_real = p,
+  d = d,
+  beta_min = beta_min,
+  beta_max = beta_max,
+  graph_type = graph_type,
+  b = b,
+  outlier_nodes = outlier_node,
+  h_ratio = 0.5,
+  thresh = 10,
+  gsem_alpha = alpha,
+  generator_output = synthetic_data,
+  save_data = TRUE
+)
+toy_metrics <- toy_simulation$evaluations
+print(head(toy_metrics))
 
 #' 시뮬레이션 결과 리스트를 단일 데이터 프레임으로 변환한다.
 bind_simulation_metrics <- function(sim_results) {
@@ -549,12 +501,9 @@ construct_output_filename <- function(prefix, combo, num_out) {
       num_out
     )
   }
-  metrics <- lapply(sim_results, function(res) {
-    df <- res$evaluations
-    df$seed <- res$seed
-    df
-  })
-  do.call(rbind, metrics)
+  metrics <- metrics[intersect(names(metrics), metric_names)]
+  template[names(metrics)] <- as.numeric(metrics)
+  template
 }
 
 #' Persist algorithm-specific results to disk.
@@ -637,6 +586,12 @@ resolve_spec <- function(spec, combo) {
   } else {
     spec
   }
+  metrics <- lapply(sim_results, function(res) {
+    df <- res$evaluations
+    df$seed <- res$seed
+    df
+  })
+  do.call(rbind, metrics)
 }
 
 #' Collapse node-wise contamination counts to a single scalar for naming.
@@ -681,7 +636,6 @@ emit_plotting_summary <- function(
     thresh = sort(unique(thresh_values)),
     seeds = seeds
   )
-  saveRDS(plotting_inputs, file = file.path(scenario_dir, "plotting_inputs.rds"))
   message("[Plotting Inputs] model=", scenario_label,
           " | dir=", scenario_dir,
           " | N=", paste(plotting_inputs$N, collapse = ","),
