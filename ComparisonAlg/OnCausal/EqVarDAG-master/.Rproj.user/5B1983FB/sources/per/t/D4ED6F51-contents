@@ -1,0 +1,508 @@
+
+########## packages #########
+
+if(!require(ggplot2)){
+  install.packages("ggplot2")
+  library(ggplot2)
+}
+
+if(!require(gridExtra)){
+  install.packages("gridExtra")
+  library(gridExtra)
+}
+
+################# simulation_data_fun ###############
+simulation_data_fun = function(N, P, d = 1, method, r_index = 1 ){
+  result_precision = result_recall = result_hamming = result_implementations = NULL
+  result_precision_byP = result_recall_byP = result_implementations_byP = NULL
+  MRS_N = MRS_N_SE = MRS_N_implementation = matrix(0, nrow = length(N), ncol = 17)
+  MRS_N_implementation = matrix(0, nrow = length(N), ncol = 1)
+  tryCatch({
+    
+    for(p_index in 1:length(P)){
+      for(n_index in 1:length(N)){
+        p_real = P[p_index]; 
+        n_real = N[n_index];
+        if(method =="USF1") DAGresult_filename = paste0("GaussianDAG_p",p_real,"_n",n_real,"_d",d,"_degree1_forward_result.Rdata")
+        if(method =="USF2") DAGresult_filename = paste0("GaussianDAG_p",p_real,"_n",n_real,"_d",d,"_degree2_forward_result.Rdata")
+        if(method =="USB1") DAGresult_filename = paste0("GaussianDAG_p",p_real,"_n",n_real,"_d",d,"_degree1_backward_result.Rdata")
+        if(method =="USB2") DAGresult_filename = paste0("GaussianDAG_p",p_real,"_n",n_real,"_d",d,"_degree2_backward_result.Rdata")
+        if(method =="PC") DAGresult_filename = paste0("PC_GaussianDAG_p",p_real,"_n",n_real,"_d",d,"_result.Rdata")
+        if(method =="GES") DAGresult_filename = paste0("GES_GaussianDAG_p",p_real,"_n",n_real,"_d",d,"_result.Rdata")
+        if(method =="MMHC") DAGresult_filename = paste0("MMHC_GaussianDAG_p",p_real,"_n",n_real,"_d",d,"_result.Rdata")
+        if(method =="GDS") DAGresult_filename = paste0("GDS_GaussianDAG_p",p_real,"_n",n_real,"_d",d,"_result.Rdata")
+        if(method =="LISTEN") DAGresult_filename = paste0("LISTEN_GaussianDAG_p",p_real,"_n",n_real,"_d",d,"_result.Rdata")
+        if(method =="LINGAM") DAGresult_filename = paste0("LINGAM_GaussianDAG_p",p_real,"_n",n_real,"_d",d,"_result.Rdata")
+        
+        MRS_out = data.loading.fun(DAGresult_filename, r_index)
+        MRS_N[n_index, ] = MRS_out$mean_output 
+        MRS_N_SE[n_index, ] = MRS_out$se_output
+        MRS_N_implementation[n_index, ] = MRS_out$number_of_implementation
+      }
+      result_precision_byP =  data.frame(x= N,y = MRS_N[,1], SE = MRS_N_SE[,1], 
+                                         Algorithm = rep( paste0(method),length(N) ) )
+      result_precision = rbind(result_precision, result_precision_byP)
+      result_recall_byP =  data.frame(x= N,y = MRS_N[,2], SE = MRS_N_SE[,2],
+                                      Algorithm = rep( paste0(method),length(N) ) )
+      result_recall = rbind(result_recall, result_recall_byP)
+      result_hamming_byP =  data.frame(x= N,y = MRS_N[,13], SE = MRS_N_SE[,13],
+                                       Algorithm = rep( paste0(method),length(N) ) )
+      result_hamming = rbind(result_hamming, result_hamming_byP)
+      
+      result_implementations_byP =  data.frame(x= N,y = MRS_N_implementation,
+                                               Algorithm = rep( paste0(method),length(N) ) )
+      result_implementations = rbind( result_implementations, result_implementations_byP )
+    }
+  }, error = function(e) {
+    return(paste0("the error code: '", e, "'"))
+  })
+  return( list(result_precision = result_precision, result_recall = result_recall, result_implementations = result_implementations, result_hamming = result_hamming) )
+}
+
+################# data.loading.fun ###############
+data.loading.fun = function(DAGresult_filename, r_index = 1){
+  
+  load(DAGresult_filename)
+  
+  result_N = result_N_SE = matrix(0, length(N), 17)
+  time_N = time_N_SE = matrix(0, length(N), 1)
+  result_precision = result_recall = result_time = NULL
+  mean_output = se_output = number_of_implementation = NA
+  simulation_result = NULL
+  
+  #length(evaluation_result)
+  
+  for(i in 1:length(evaluation_result)){
+    if( is.numeric(evaluation_result[[i]][[1]]) ){
+      simulation_result = cbind(simulation_result, evaluation_result[[i]][[r_index]])
+    }
+  }
+  if(!is.null(simulation_result)){
+    mean_output  = rowMeans( (simulation_result), na.rm = T )
+    se_output  = apply( (simulation_result), 1, sd, na.rm = T)/sqrt(ncol(simulation_result))
+    number_of_implementation = ncol(simulation_result)
+  }
+  return( list(mean_output = mean_output, se_output = se_output, number_of_implementation = number_of_implementation) )
+}
+
+
+
+
+
+
+
+
+
+############## Complete Result #################
+setwd("C:/2019GaussianSEM_SimulationResult/Result/Homo")
+setwd("C:/2019GaussianSEM_SimulationResult/Result/Hetero")
+setwd("C:/2019GaussianSEM_SimulationResult/Result/PolyHomo")
+setwd("C:/2019GaussianSEM_SimulationResult/Result/PolyHetero")
+setwd("C:/2019GaussianSEM_SimulationResult/Result/NonFaithful")
+setwd("C:/2019GaussianSEM_SimulationResult/Result/NonGauss")
+setwd("C:/2019GaussianSEM_SimulationResult/Result/NonGauss2")
+setwd("C:/2019GaussianSEM_SimulationResult/Result/NonGPolySEM")
+
+N = seq(250, 2500, by = 250)
+#N = seq(500, 5000, by = 500)
+#N = seq(20, 200, by = 20)
+P = 20
+d = 4
+j = 1
+r_index = 4;
+### j: 1 DAG, 2 MEC ###
+### r_index: 1 precision, 2 recall, 3 implementation, 4 hamming #### 
+
+simulation_data_fun(N, P, d, "USF1", 6)[[r_index]]
+simulation_data_fun(N, P, d, "USB1", 6)[[r_index]]
+simulation_data_fun(N, P, d, "LISTEN", 6)[[r_index]]
+simulation_data_fun(N, P, d, "LINGAM", 6)[[r_index]]
+simulation_data_fun(N, P, d, "GDS", 6)[[r_index]]
+
+################### plotting ############
+result1 = result2 = result3 = result4 = result5 = result6 = result7 = NULL
+result1 = simulation_data_fun(N, P, d, "USF1", j)[[r_index]]
+result2 = simulation_data_fun(N, P, d, "USB1", j)[[r_index]]
+result3 = simulation_data_fun(N, P, d, "USF1", 3)[[r_index]]
+result4 = simulation_data_fun(N, P, d, "USB1", 3)[[r_index]]
+result5 = simulation_data_fun(N, P, d, "LISTEN", j)[[r_index]]
+result6 = simulation_data_fun(N, P, d, "LINGAM", j)[[r_index]]
+result7 = simulation_data_fun(N, P, d, "GDS", j)[[r_index]]
+
+result3[,4] = rep("USF1Oracle",nrow(result1))
+result4[,4] = rep("USB1Oracle",nrow(result1))
+result = as.data.frame( rbind( result1, result2,result3, result4, result5, result6, result7) )
+
+linesize= 1.0
+#id = 1:5
+#id = c(1,2,3,4,5,6)
+id = c(1,2,3,4,5,6,7)
+Color = c("black", "red", "blue", "purple4", "green4", "tomato4", "orange")[id]
+LineType = c("solid", "solid", "dashed", "dashed",  "longdash" , "longdash",  "dotted")[id]
+LineShape = c(16, 17, 18, 6, 7, 8, 12)[id]
+
+### png 450/300 ###
+q = ggplot( data = result, aes(y= y, x= x, group = Algorithm, color = Algorithm, shape = Algorithm) )
+q = q + geom_errorbar(data = result, aes(ymin = y-SE ,  ymax = y+SE), width= 10)
+q = q + geom_line( aes(linetype=Algorithm), size = linesize ) +  
+  scale_color_manual(values=Color  ) +
+  scale_linetype_manual(values= LineType) +
+  scale_shape_manual(values = LineShape)
+q = q + geom_point( size = 2.5 )
+q = q + theme_minimal(base_size = 11, base_family = "",
+                      base_line_size = 11/22, base_rect_size = 10/100)
+q = q + xlab("Sample Size") + ylab("") #+ ylim(0,1000)
+q = q + theme(title= element_text(face = "bold", color= "black"), legend.position = "right" )
+q
+
+############ Plot End #############
+j = 1
+N = seq(250, 2500, by = 250)
+#N = seq(500, 3500, by = 500)
+###### plots for low dimensional settings ####
+for(model in c( "NonGSEM") ){
+  if(model =="homoGSEM"){
+    setwd("C:/2019GaussianSEM_SimulationResult/Result/Homo")
+  }
+  if(model =="heteroGSEM"){
+    setwd("C:/2019GaussianSEM_SimulationResult/Result/Hetero")
+  }
+  if(model =="polyhomoGSEM"){
+    setwd("C:/2019GaussianSEM_SimulationResult/Result/PolyHomo")
+  }
+  if(model =="polyheteroGSEM"){
+    setwd("C:/2019GaussianSEM_SimulationResult/Result/PolyHetero")
+  }
+  if(model =="NonGSEM"){
+    setwd("C:/2019GaussianSEM_SimulationResult/Result/NonGauss")
+  }
+  if(model =="NonGSEM2"){
+    setwd("C:/2019GaussianSEM_SimulationResult/Result/NonGauss2")
+  }
+  if(model =="NonGPolySEM"){
+    setwd("C:/2019GaussianSEM_SimulationResult/Result/NonGPolySEM")
+  }
+  for(P in c(20)  ){
+    for( d in c(2) ){
+      for(r_index in c(1,2,4) ){
+        
+        if(r_index ==1){
+          plot_filename = paste0("C:/Users/gwpar/Dropbox/2019IdentifiabilityANM_Low/JMLR_submission/plots/",model,"P",P,"D",d,"PrecisionDAG.png")
+        }else if(r_index ==2){
+          plot_filename = paste0("C:/Users/gwpar/Dropbox/2019IdentifiabilityANM_Low/JMLR_submission/plots/",model,"P",P,"D",d,"RecallDAG.png")
+        }else if(r_index ==4){
+          plot_filename = paste0("C:/Users/gwpar/Dropbox/2019IdentifiabilityANM_Low/JMLR_submission/plots/",model,"P",P,"D",d,"HamDAG.png")
+        }
+        
+        png(plot_filename, width = 450, height = 300)
+        
+        ################### plotting ############
+        result1 = result2 = result3 = result4 = result5 = result6 = result7 = NULL
+        result1 = simulation_data_fun(N, P, d, "USF1", j)[[r_index]]
+        result2 = simulation_data_fun(N, P, d, "USB1", j)[[r_index]]
+        result3 = simulation_data_fun(N, P, d, "USF1", 3)[[r_index]]
+        result4 = simulation_data_fun(N, P, d, "USB1", 3)[[r_index]]
+        result5 = simulation_data_fun(N, P, d, "LISTEN", j)[[r_index]]
+        result6 = simulation_data_fun(N, P, d, "LINGAM", j)[[r_index]]
+        result7 = simulation_data_fun(N, P, d, "GDS", j)[[r_index]]
+        
+        result3[,4] = rep("USF2Oracle",nrow(result1))
+        result4[,4] = rep("USB2Oracle",nrow(result1))
+        
+        #result6 = simulation_data_fun(N, P, d, "LINGAM", j)[[r_index]]
+        
+        #result2[,4] = "USF"
+        result = as.data.frame( rbind( result1, result2,result3, result4, result5, result6, result7) )
+        
+        linesize= 1.0
+        #id = 1:5
+        #id = c(1,2,3,4,5,6)
+        id = c(1,2,3,4,5,6,7)
+        Color = c("black", "red", "blue", "purple4", "green4", "tomato4", "orange")[id]
+        LineType = c("solid", "solid", "longdash", "longdash",  "longdash" , "longdash",  "dotted")[id]
+        LineShape = c(16, 17, 18, 6, 7, 8, 12)[id]
+        
+        ### png 450/300 ###
+        q = ggplot( data = result, aes(y= y, x= x, group = Algorithm, color = Algorithm, shape = Algorithm) )
+        q = q + geom_errorbar(data = result, aes(ymin = y-SE ,  ymax = y+SE), width= 10)
+        q = q + geom_line( aes(linetype=Algorithm), size = linesize ) +  
+          scale_color_manual(values=Color  ) +
+          scale_linetype_manual(values= LineType) +
+          scale_shape_manual(values = LineShape)
+        q = q + geom_point( size = 2.5 ) 
+        if(r_index < 3){
+          q = q + xlab("Sample Size") + ylab("")  + ylim(0.0,1)
+        }else{
+          if(P <100){
+            q = q + xlab("Sample Size") + ylab("") # + ylim(0.0,1000)
+          }else{
+            q = q + xlab("Sample Size") + ylab("") + ylim(0.0,1000)
+          }
+        }
+        q = q + theme_minimal(base_size = 11, base_family = "",
+                              base_line_size = 11/22, base_rect_size = 10/100)
+        q = q + theme(title= element_text(face = "bold", color= "black"), legend.position = "none" )
+        
+        print(q) 
+        ############ Plot End #############
+        
+        dev.off()
+        # Sys.sleep(1)
+      }
+    }
+  }
+}
+
+########################
+
+setwd("C:/2019GaussianSEM_SimulationResult/Result/Homo")
+N = seq(250, 2500, by =250)
+P = 20
+USF1_time = simulation_data_fun(N, P, d, "USF1", 6)
+USB1_time = simulation_data_fun(N, P, d,  "USB1", 6)
+GDS_time = simulation_data_fun(N, P, d,  "GDS", 6)
+LINGAM_time = simulation_data_fun(N, P, d,  "LINGAM", 6)
+LISTEN_time = simulation_data_fun(N, P, d,  "LISTEN", 6)
+
+
+
+USF1_time[[1]]$x = P
+GES_time[[1]]$x = P
+MMHC_time[[1]]$x = P
+
+Oracle_time$y = 2*log(P) - 2*log(10)
+Oracle_time[,4] = "4.2LogP"
+Oracle_time2 = MRS_time[[1]]
+Oracle_time2$y = 3*log(P) - 3*log(10)
+Oracle_time2[,4] = "5.2LogP"
+
+result = rbind( MRS_time[[1]], GES_time[[1]], MMHC_time[[1]])
+result$y = (result$y)
+#result$SE = 0
+q = ggplot( data = result, aes(y= y, x= x, group = Algorithm, color = Algorithm, shape = Algorithm) )
+q = q + geom_errorbar(data = result, aes(ymin = y-SE ,  ymax = y+SE), width= 50)
+q = q + geom_line( aes(linetype=Algorithm), size = 1 ) +  
+  scale_color_manual(values=c("red", "green4", "tomato4", "blue", "purple")  ) +
+  scale_linetype_manual(values=c("solid", "dashed",  "dashed",  "dashed",  "dashed" )) +
+  scale_shape_manual(values = c(17, 7, 8, 9, 10))
+q = q + geom_point(size = 2.5) 
+q = q + xlab("Sample Size") + ylab("Run Time (Seconds)") #+ ggtitle("Skeleton") 
+q = q + theme(title= element_text(face = "bold", color= "black"), legend.position = "none" )
+q
+
+
+############## Complete Result #################
+
+setwd("C:/2019GaussianSEM_SimulationResult/Result/Homo")
+setwd("C:/2019GaussianSEM_SimulationResult/Result/Hetero")
+setwd("C:/2019GaussianSEM_SimulationResult/Result/NonFaithful")
+
+N = seq(100, 1000, by = 100)
+#N = seq(20, 200, by = 20)
+P = 50
+
+j = 6; r_index = 1
+
+###################
+result1 = result2 = result3 = result4 = NULL
+result1 = simulation_data_fun(N, P, "Our Method", j)[[r_index]]
+result2 = simulation_data_fun(N, P, "GDS", j)[[r_index]]
+#result3 = simulation_data_fun(N, P, "PC", j)[[r_index]]
+#result4 = simulation_data_fun(N, P, "GES", j)[[r_index]]
+result = as.data.frame( rbind( result1, result2,result3, result4) )
+
+library(xtable)
+result = cbind(result1[,1:3], result[,2:3])
+xtable( (result2) )
+x =  result1$y
+y =  result1$y
+z = result1$y
+data = rbind( cbind(x, 20), cbind(y, 50), cbind(z, 80) )
+mean(y)/mean(x)
+/, mean(z) )
+lm(data[,1] ~ data[,2])
+
+linesize= 1.0
+#id = 1:5
+id = c(1,2,3,4)
+Color = c("black", "red", "blue", "purple4", "green4", "tomato4")[id]
+LineType = c("solid", "dotted", "dashed", "dashed",  "dashed" , "dashed")[id]
+LineShape = c(16, 17, 18, 6, 7, 8)[id]
+
+### png 450/300 ###
+q = ggplot( data = result, aes(y= y, x= x, group = Algorithm, color = Algorithm, shape = Algorithm) )
+q = q + geom_errorbar(data = result, aes(ymin = y-SE ,  ymax = y+SE), width= 10)
+q = q + geom_line( aes(linetype=Algorithm), size = linesize ) +  
+  scale_color_manual(values=Color  ) +
+  scale_linetype_manual(values= LineType) +
+  scale_shape_manual(values = LineShape)
+q = q + geom_point( size = 2.5 ) 
+q = q + xlab("Sample Size") + ylab("") 
+q = q + theme(title= element_text(face = "bold", color= "black"), legend.position = "none" )
+q 
+########################
+
+
+
+
+#######################
+MRS_result1 =MRS_result2 = Oracle_result = GES_result = MMHC_result = ODS_result1= NULL
+MRS_result1 = simulation_data_fun(N, P, "MRS", 1)
+#MRS_result2 = simulation_data_fun(N, P, "MRS", 1)
+ODS_result1 = simulation_data_fun(N, P, "ODS", 1)
+Oracle_result = simulation_data_fun(N, P, "MRS", 3)
+GES_result = simulation_data_fun(N, P, "GES", 1)
+MMHC_result = simulation_data_fun(N, P, "MMHC", 1)
+
+#Oracle_result[[1]][,2] = 1
+#Oracle_result[[1]][,3] = 0
+#Oracle_result[[2]][,2] = 1
+#Oracle_result[[2]][,3] = 0
+
+MRS_result1[[1]][,4] = "2.MRS DAG"
+MRS_result1[[2]][,4] = "2.MRS DAG"
+ODS_result1[[1]][,4] = "3.ODS DAG"
+ODS_result1[[2]][,4] = "3.ODS DAG"
+Oracle_result[[1]][,4] ="1.Oracle"
+Oracle_result[[2]][,4] ="1.Oracle"
+GES_result[[1]][,4] ="4.GES DAG"
+GES_result[[2]][,4] ="4.GES DAG"
+MMHC_result[[1]][,4] ="5.MMHC DAG"
+MMHC_result[[2]][,4] ="5.MMHC DAG"
+
+MRS_result1[[1]][,4] = "2.MRS MEC"
+MRS_result1[[2]][,4] = "2.MRS MEC"
+ODS_result1[[1]][,4] = "3.ODS MEC"
+ODS_result1[[2]][,4] = "3.ODS MEC"
+Oracle_result[[1]][,4] ="1.Oracle"
+Oracle_result[[2]][,4] ="1.Oracle"
+GES_result[[1]][,4] ="4.GES MEC"
+GES_result[[2]][,4] ="4.GES MEC"
+MMHC_result[[1]][,4] ="5.MMHC MEC"
+MMHC_result[[2]][,4] ="5.MMHC MEC"
+
+#MRS_result2[[1]][,4] = "4.MRS MEC"
+#MRS_result2[[2]][,4] = "4.MRS MEC"
+
+result1 = rbind( Oracle_result[[1]], MRS_result1[[1]], MRS_result2[[1]], ODS_result1[[1]], GES_result[[1]], MMHC_result[[1]] )
+result2 = rbind( Oracle_result[[1]], MRS_result1[[2]], MRS_result2[[2]], ODS_result1[[2]], GES_result[[2]], MMHC_result[[2]] )
+
+######################
+#result1 = rbind( Oracle_result[[1]], MRS_result1[[1]], MRS_result2[[1]], GES_result[[1]], MMHC_result[[1]] )
+#result2 = rbind( Oracle_result[[1]], MRS_result1[[2]], MRS_result2[[2]], GES_result[[2]], MMHC_result[[2]] )
+
+linesize= 1.0
+id = 1:5
+Color = c("black", "red", "blue", "purple4", "green4", "tomato4")[id]
+LineType = c("solid", "solid", "solid", "dashed",  "dashed" , "dashed")[id]
+LineShape = c(16, 17, 18, 6, 7, 8)[id]
+### png 450/300 ###
+q = ggplot( data = result1, aes(y= y, x= x, group = Algorithm, color = Algorithm, shape = Algorithm) )
+#q = ggplot( data = result_time, aes(y= y, x= x, group = Algorithm, color = Algorithm, shape = Algorithm) )
+q = q + ylim(0.0, 1.00)
+q = q + geom_errorbar(data = result1, aes(ymin = y-SE ,  ymax = y+SE), width= 10)
+q = q + geom_line( aes(linetype=Algorithm), size = linesize ) +  
+  scale_color_manual(values=Color  ) +
+  scale_linetype_manual(values= LineType) +
+  scale_shape_manual(values = LineShape)
+q = q + geom_point( size = 2.5 ) 
+q = q + xlab("Sample Size") + ylab("") 
+q = q + theme(title= element_text(face = "bold", color= "black"), legend.position = "right" )
+q 
+
+q = ggplot( data = result2, aes(y= y, x= x, group = Algorithm, color = Algorithm, shape = Algorithm) )
+#q = ggplot( data = result_time, aes(y= y, x= x, group = Algorithm, color = Algorithm, shape = Algorithm) )
+q = q + ylim(0.0, 1.00)
+q = q + geom_errorbar(data = result2, aes(ymin = y-SE ,  ymax = y+SE), width= 10)
+q = q + geom_line( aes(linetype=Algorithm), size = linesize ) +  
+  scale_color_manual(values=Color  ) +
+  scale_linetype_manual(values=LineType) +
+  scale_shape_manual(values = LineShape)
+q = q + geom_point( size = 2.5 ) 
+q = q + xlab("Sample Size") + ylab("") 
+q = q + theme(title= element_text(face = "bold", color= "black"), legend.position = "none" )
+q
+
+### png 450/300 ###
+
+q = ggplot( data = result1, aes(y= y, x= x, group = Algorithm, color = Algorithm, shape = Algorithm) )
+#q = ggplot( data = result_time, aes(y= y, x= x, group = Algorithm, color = Algorithm, shape = Algorithm) )
+q = q + ylim(0.0, 1)
+q = q + geom_errorbar(data = result1, aes(ymin = y-SE ,  ymax = y+SE), width= 40)
+q = q + geom_line( aes(linetype=Algorithm), size = linesize ) +  
+  scale_color_manual(values=c("black", "red", "purple4", "green4", "tomato4")  ) +
+  scale_linetype_manual(values=c("solid", "solid", "dashed",  "dashed" , "dashed")) +
+  scale_shape_manual(values = c(16, 17, 6, 7, 8))
+q = q + geom_point( size = 2.5 )
+q = q + xlab("Sample Size") + ylab("") 
+q = q + theme(title= element_text(face = "bold", color= "black"), legend.position = "none" )
+q
+
+### png 450/300 ###
+
+q = ggplot( data = result2, aes(y= y, x= x, group = Algorithm, color = Algorithm, shape = Algorithm) )
+#q = ggplot( data = result_time, aes(y= y, x= x, group = Algorithm, color = Algorithm, shape = Algorithm) )
+q = q + ylim(0.0, 1)
+q = q + geom_errorbar(data = result2, aes(ymin = y-SE ,  ymax = y+SE), width= 40)
+q = q + geom_line( aes(linetype=Algorithm), size = linesize ) +  
+  scale_color_manual(values=c("black", "red", "purple4", "green4", "tomato4")  ) +
+  scale_linetype_manual(values=c("solid", "solid", "dashed",  "dashed" , "dashed")) +
+  scale_shape_manual(values = c(16, 17, 6, 7, 8))
+q = q + geom_point( size = 2.5 )
+q = q + xlab("Sample Size") + ylab("") 
+q = q + theme(title= element_text(face = "bold", color= "black"), legend.position = "none" )
+q
+
+q = q + theme(title= element_text(face = "bold", color= "black"), legend.position = "right" )
+q
+
+
+###
+
+
+setwd("C:/2018AISTATS_GSEM/R-code/PoissonDAGresult_logLink_d1/")
+setwd("C:/2018AISTATS_GSEM/R-code/PoissonDAGresult_logLink_d2/")
+setwd("C:/2018AISTATS_GSEM/R-code/PoissonDAGresult_logLink_d5/")
+setwd("C:/2018AISTATS_GSEM/R-code/PoissonDAGresult_logLink_d10/")
+
+
+N = 500
+P = seq(10, 200, by = 10)
+
+N = seq(100,1000, by=100)
+P = c(500)
+
+MRS_time = simulation_data_fun(N, P, "MRS", 6)
+GES_time = simulation_data_fun(N, P, "GES", 6)
+MMHC_time = simulation_data_fun(N, P, "MMHC", 6)
+
+MRS_time[[1]][,4] = "1.MRS"
+GES_time[[1]][,4] ="2.GES"
+MMHC_time[[1]][,4] ="3.MMHC"
+
+MRS_time[[1]]$x = P
+GES_time[[1]]$x = P
+MMHC_time[[1]]$x = P
+
+Oracle_time$y = 2*log(P) - 2*log(10)
+Oracle_time[,4] = "4.2LogP"
+Oracle_time2 = MRS_time[[1]]
+Oracle_time2$y = 3*log(P) - 3*log(10)
+Oracle_time2[,4] = "5.2LogP"
+
+result = rbind( MRS_time[[1]], GES_time[[1]], MMHC_time[[1]])
+result$y = (result$y)
+#result$SE = 0
+q = ggplot( data = result, aes(y= y, x= x, group = Algorithm, color = Algorithm, shape = Algorithm) )
+q = q + geom_errorbar(data = result, aes(ymin = y-SE ,  ymax = y+SE), width= 50)
+q = q + geom_line( aes(linetype=Algorithm), size = 1 ) +  
+  scale_color_manual(values=c("red", "green4", "tomato4", "blue", "purple")  ) +
+  scale_linetype_manual(values=c("solid", "dashed",  "dashed",  "dashed",  "dashed" )) +
+  scale_shape_manual(values = c(17, 7, 8, 9, 10))
+q = q + geom_point(size = 2.5) 
+q = q + xlab("Sample Size") + ylab("Run Time (Seconds)") #+ ggtitle("Skeleton") 
+q = q + theme(title= element_text(face = "bold", color= "black"), legend.position = "none" )
+q
+
+
+

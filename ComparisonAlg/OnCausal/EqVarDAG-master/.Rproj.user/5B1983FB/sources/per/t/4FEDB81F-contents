@@ -1,0 +1,310 @@
+
+setwd("C:/Users/gwpar/Dropbox/GroupMeeting/Algorithm(Rcode, 20181220)")
+source("GaussianSEM/GSEM_generator(20190930).R")
+source("GaussianSEM/HGSEM Algorithm(20190220).R")
+source("GaussianSEM/GSEM_Learning_Algorithm(20190413).R")
+source("ComparisonAlg/GLS(ghoash)/learn_gbn.R")
+source("ComparisonAlg/LISTEN(ghoash)/LISTEN_Algorithm(20190515).R")
+source("ComparisonAlg/GES_Algorithm(20181219).R")
+source("ComparisonAlg/GDS(peter)/GDS(20190515).R")
+source("ComparisonAlg/OnCausal/EqVarDAG-master/R/EqVarDAG_HD_TD.R")
+source("Evaluation_Algorithm(20181005).R")
+############
+
+o#### toy example #####
+options(warn=0)
+# GSEM settings: Equal Variance###
+
+n = 1000
+p = 500
+d = 3
+beta_min = 1/2
+beta_max = 1/2
+alpha = 1* max( c( 1 - pnorm( n^(1/3)/2 ), 0.1^1000 * 1 ) )
+lambda = 0.01 #0.02*log(p)/n
+total_res =  matrix(0, nrow = 17, ncol= 6)
+total_res2 = matrix(0, nrow = 17, ncol= 4)
+total_time = matrix(0, nrow = 1, ncol= 5)
+
+k = 1
+for(i in 1:k){
+synthetic.graph = GSEM_generator( n, p, d, var_Min = sqrt(0.6), var_Max = sqrt(0.80), dist = "Gaussian", beta_min, beta_max, graph_type  = 5, structure = NULL, seed = i, path = FALSE )
+graph = synthetic.graph$true_Matrix
+data = synthetic.graph$x
+error = synthetic.graph$noise
+Sigma = (solve( diag(p) - graph)) %*% diag( error^2 ) %*% t(solve( diag(p) - graph) )
+barplot(diag(Sigma))
+
+Omega = matrix(0, p, p )
+for(j in p:2){
+  #Omega[1:j, 1:j] =cov2cor( solve(Sigma[1:j, 1:j]) )
+}
+#nonbeta = round( Omega, 3 )
+#nonbeta = nonbeta[abs(nonbeta) != 0]
+#hist( abs(nonbeta[nonbeta!=1]) , main ="partial correlation")
+
+data = synthetic.graph$x
+B = synthetic.graph$true_Matrix
+B[B!=0] = 1
+
+### 3*log( ncol(data))/nrow(data)
+res0 = GSEM_Algorithm_True( Sigma, direction ="forward", graph = graph)
+#res1 = HGSEM_Algorithm(data, alpha = alpha, sparsity_level = lambda  , graph = graph)
+#res2 = GSEM_Algorithm(data, alpha = alpha, direction ="forward", graph = graph, max_degree = 1)
+#res3 = LISTEN_Algorithm(X = data, reg_param= lambda, hard_thresholding = beta_min/2, graph = graph)
+#res4 = TD(data, q = d, graph = graph)
+#res5 = TD(data, q = d+1, graph = graph)
+#res5 = GDS_Algorithm(data, scoreName = "SEMSEV", pars = list(regr.pars = list()), check = "checkUntilFirstMinK", output = FALSE,startAt = "emptyGraph", graph = graph)
+res = cbind( res0[[1]], res1[[1]], res2[[1]], res3[[1]], res4[[1]], res5[[1]])
+res00 = cbind( res1[[3]], res2[[3]], res3[[3]], res4[[3]], res5[[3]])
+time = cbind( res1[[6]], res2[[6]], res3[[6]], res4[[6]], res5[[6]])
+total_res = res + total_res
+total_res2 = res00 + total_res2
+total_time = time + total_time
+}
+round( total_res/k, 3)[c(1:2,13,14),]
+round( total_res2/k, 3)[c(1:2,13,14),]
+round( total_time/k, 3)
+
+####
+
+
+##### Unifying HGSEM algorithm ####
+numCores <- 34
+myCluster <- parallel::makeCluster(numCores)
+doParallel::registerDoParallel(myCluster)
+
+N_real = seq(100, 1000, by = 100)
+P_real = c(20)
+
+for(p_real in P_real){
+  for( model in c("heteroGSEM") ){
+  for( d in c(1,2,3) ){
+    for(n_index in N_real){
+      print(n_index)
+      n_real = n_index;  evaluation_result = NULL
+      evaluation_result = foreach::foreach(i = 1:100
+                                           , .combine = list, .multicombine = TRUE)  %dopar% {
+                                             tryCatch({
+                                               HGSEM_simulation_fun(seed = i, n_real, p_real, d = d, alpha = 1 - pnorm( n_real^(1/3)/2 ) , model = model)
+                                             }, error = function(e) {
+                                               return(paste0("The variable '", i, "'", " caused the error: '", e, "'"))
+                                             })
+                                           }
+      GaussianDAGresult_filename = paste0("HGausosianDAG_p",p_real,"_n",n_real,"_d",d,"_result.Rdata")
+      if(model =="heteroGSEM"){
+        setwd("C:/2020HGSEM_Simulation/Result/Hetero")
+      }
+      save(evaluation_result, file = GaussianDAGresult_filename)
+    }
+  }
+}
+}
+
+##### Unifying US algorithm ####
+for(p_real in P_real){
+for( model in c("heteroGSEM") ){
+  for( d in c(1,2,3) ){
+    for(direction in c("forward") ){
+      for(max_degree in 1:1 ){
+        for(n_index in N_real){
+          print(n_index)
+          n_real = n_index; evaluation_result = NULL
+          evaluation_result = foreach::foreach(i = 1:100
+                                               , .combine = list, .multicombine = TRUE)  %dopar% {
+                                                 tryCatch({
+                                                   GSEM_simulation_fun(seed = i, n_real, p_real, d = d, max_degree = max_degree, direction = direction, alpha = 1 - pnorm( n_real^(1/3)/2 ) , model = model)
+                                                 }, error = function(e) {
+                                                   return(paste0("The variable '", i, "'", " caused the error: '", e, "'"))
+                                                 })
+                                               }
+          GaussianDAGresult_filename = paste0("GaussianDAG_p",p_real,"_n",n_real,"_d",d,"_degree",max_degree,"_",direction,"_result.Rdata")
+          if(model =="heteroGSEM"){
+            setwd("C:/2020HGSEM_Simulation/Result/Hetero")
+          }
+          save(evaluation_result, file = GaussianDAGresult_filename)
+        }
+      }
+    }
+  }
+}
+}
+
+############# GDS  #################
+for(p_real in P_real){
+for( model in c("heteroGSEM") ){
+  for(d in c(1,2,3) ){
+    for(n_index in N_real){
+      print(n_index)
+      n_real = n_index;
+      evaluation_result = foreach::foreach(i = 1:100
+                                           , .combine = list, .multicombine = TRUE)  %dopar% {
+                                             tryCatch({
+                                               GDS_simulation_fun(seed = i, n_real = n_real, p_real = p_real, d = d, model = model)
+                                             }, error = function(e) {
+                                               return(paste0("The variable '", i, "'", " caused the error: '", e, "'"))
+                                             })
+                                           }
+        GaussianDAGresult_filename = paste0("GDS_GaussianDAG_p",p_real,"_n",n_real,"_d",d,"_result.Rdata")
+        if(model =="heteroGSEM"){
+          setwd("C:/2020HGSEM_Simulation/Result/Hetero")
+        }
+        save(evaluation_result, file = GaussianDAGresult_filename)
+    }
+  }
+}
+}
+
+#### PC, GES, Lingam ##########
+for(p_real in P_real){
+for( model in c("heteroGSEM") ){
+  for( method in c("GES", "PC") ){
+    for( d in c(1,2,3) ){
+      for(n_index in N_real){
+        print(n_index)
+        n_real = n_index;
+        evaluation_result = foreach::foreach(i = 1:100
+                                             , .combine = list, .multicombine = TRUE) %dopar% {
+                                               tryCatch({
+                                                 GES_simulation_fun(seed = i, n_real = n_real, p_real = p_real, d = d, method = method, alpha = 1 - pnorm( n_real^(1/3)/2 ), model = model )
+                                               }, error = function(e) {
+                                                 return(paste0("The variable '", i, "'", " caused the error: '", e, "'"))
+                                               })
+                                             }
+
+        GaussianDAGresult_filename = paste0(method,"_GaussianDAG_p",p_real,"_n",n_real,"_d",d,"_result.Rdata")
+        if(model =="heteroGSEM"){
+          setwd("C:/2020HGSEM_Simulation/Result/Hetero")
+        }
+        save(evaluation_result, file = GaussianDAGresult_filename)
+      }
+    }
+  }
+}
+}
+
+#### LISTEN ##########
+for(p_real in P_real){
+for( model in c("heteroGSEM") ){
+  for( d in c(1,2,3) ){
+    for(n_index in N_real){
+      print(n_index)
+      n_real = n_index;
+      evaluation_result = foreach::foreach(i = 1:100
+                                           , .combine = list, .multicombine = TRUE)  %dopar% {
+                                             tryCatch({
+                                               LISTEN_simulation_fun(seed = i, n_real = n_real, p_real = p_real, d = d, reg_param = 0.001, hard_thresholding = 1/6, model = model )
+                                             }, error = function(e) {
+                                               return(paste0("The variable '", i, "'", " caused the error: '", e, "'"))
+                                             })
+                                           }
+
+      GaussianDAGresult_filename = paste0("LISTEN_GaussianDAG_p",p_real,"_n",n_real,"_d",d,"_result.Rdata")
+
+      if(model =="homoGSEM"){
+        setwd("C:/2020HGSEM_Simulation/Result/Homo")
+      }
+      if(model =="heteroGSEM"){
+        setwd("C:/2020HGSEM_Simulation/Result/Hetero")
+      }
+      save(evaluation_result, file = GaussianDAGresult_filename)
+    }
+  }
+}
+}
+
+#### TD ##########
+for(p_real in P_real){
+  for( model in c("heteroGSEM") ){
+    for( d in c(1,2,3) ){
+      for(n_index in N_real){
+        print(n_index)
+        n_real = n_index;
+        evaluation_result = foreach::foreach(i = 1:100
+                                             , .combine = list, .multicombine = TRUE)  %dopar% {
+                                               tryCatch({
+                                                 TD_simulation_fun(seed = i, n_real = n_real, p_real = p_real, d = d, model = model )
+                                               }, error = function(e) {
+                                                 return(paste0("The variable '", i, "'", " caused the error: '", e, "'"))
+                                               })
+                                             }
+
+        GaussianDAGresult_filename = paste0("TD_GaussianDAG_p",p_real,"_n",n_real,"_d",d,"_result.Rdata")
+
+        if(model =="homoGSEM"){
+          setwd("C:/2020HGSEM_Simulation/Result/Homo")
+        }
+        if(model =="heteroGSEM"){
+          setwd("C:/2020HGSEM_Simulation/Result/Hetero")
+        }
+        save(evaluation_result, file = GaussianDAGresult_filename)
+      }
+    }
+  }
+}
+
+
+parallel::stopCluster(myCluster)
+
+
+########################
+
+#########################
+#### Data Generation ####
+#########################
+
+## GSEM settings: Heterogeneous Variance #
+p = 3000; n = 2000; d = 3;
+beta_min = 1/2; beta_max = 1/2
+graph_type = 5
+
+## 1: tree, 2: bipartite, 3: cycle, 4: random , 5: fixed number of parents random2, 6 fixed ordering random, 7 manual ##
+
+####
+numCores <- 34
+myCluster <- parallel::makeCluster(numCores)
+doParallel::registerDoParallel(myCluster)
+
+for(d in 1:3){
+  data = foreach::foreach(i = 1:100
+                   , .combine = list, .multicombine = TRUE) %dopar% {
+            tryCatch({
+              print(i)
+              synthetic.graph = GSEM_generator(n, p, d, var_Min = sqrt(0.6), var_Max = sqrt(0.80), dist = "Gaussian", beta_min, beta_max, graph_type  = 5, structure = NULL, seed = i, path = T )
+            }, error=function(e){})
+  }
+}
+
+parallel::stopCluster(myCluster)
+
+
+
+############################
+i = 1
+GSEM_simulation_fun(seed = i, n_real = 200, p_real= 50, d = 1, max_degree = 1, direction = "forward", alpha = 0.001 )$DAG_Evaluation
+GSEM_simulation_fun(seed = i, n_real = 200, p_real= 50, d = 1, max_degree = 1, direction = "backward", alpha = 0.001 )$DAG_Evaluation
+GSEM_simulation_fun(seed = i, n_real = 200, p_real= 10, d = 1, max_degree = 2, direction = "forward", alpha = 0.001 )$DAG_Evaluation
+GSEM_simulation_fun(seed = i, n_real = 200, p_real= 10, d = 1, max_degree = 2, direction = "backward", alpha = 0.001 )$DAG_Evaluation
+
+############## non-faithful #####################
+B = matrix( c(0,1,1, 0,0,1, 0,0,0), 3, 3)
+I = diag(3)
+Sigma = diag(3)
+Sigma[1,1] = 2.25
+Sigma[2,2] = 1.5
+Sigma[3,3] = 1.5
+A = solve(I - B) %*% Sigma %*% solve( t(I-B) )
+
+library(MASS)
+for(seed in 1:100){
+  set.seed = seed
+  x = mvrnorm(n = 1000, mu = c(0,0,0), Sigma = A )
+  x = as.data.frame(x)
+  DAGsamples = list(x= x, true_Matrix= B )
+  setwd("C:/2019GaussianSEM_SimulationResult/Data/NonFaithful")
+  GaussianDAG_filename = paste0("GaussianSEM_p",3,"_seed",seed,".Rdata")
+  save(DAGsamples, file = GaussianDAG_filename)
+}
+
+
+

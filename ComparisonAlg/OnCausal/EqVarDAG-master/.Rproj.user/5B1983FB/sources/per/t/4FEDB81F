@@ -1,0 +1,25 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1583375910314.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "233326076",
+    "id" : "4FEDB81F",
+    "lastKnownWriteTime" : 1583381703,
+    "last_content_update" : 1583381732038,
+    "path" : "C:/Users/gwpar/Dropbox/GroupMeeting/Algorithm(Rcode, 20181220)/GaussianSEM/Simulation_Code_for_HGSEM_Learning(20190930).R",
+    "project_path" : null,
+    "properties" : {
+        "cursorPosition" : "68,4",
+        "scrollLine" : "0"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 3,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

@@ -1,0 +1,25 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1583331505990.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "1|20|12|0|\n14|66|60|0|\n",
+    "hash" : "3515552138",
+    "id" : "125B7C6F",
+    "lastKnownWriteTime" : 1583381790,
+    "last_content_update" : 1583381790947,
+    "path" : "C:/Users/gwpar/Dropbox/GroupMeeting/Algorithm(Rcode, 20181220)/GaussianSEM/Plotting_HGSEM(20191001).R",
+    "project_path" : null,
+    "properties" : {
+        "cursorPosition" : "147,49",
+        "scrollLine" : "130"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 1,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}
