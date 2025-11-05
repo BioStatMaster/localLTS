@@ -569,3 +569,290 @@ GSEM_generator_Sensitivity = function( n, p, d =2, var_Min = 1, var_Max = 1, dis
   # }
   return( DAGsamples)
 }
+
+## ============================================================
+## Contaminated Causal Linear SEM (CCLSM) data generator helpers
+## ------------------------------------------------------------
+## CCLSM_generate:  generate contaminated observations for a
+## pre-specified adjacency matrix B.
+## CCLSM_generator: sample a random graph via Graph_Generator and
+## delegate to CCLSM_generate so existing pipelines can call it with
+## the same arguments as LTS_GSEM_generator.
+## ============================================================
+
+#' Generate contaminated SEM data for a fixed graph
+#'
+#' @param n Number of samples.
+#' @param B Weighted adjacency matrix (lower-triangular for DAG order).
+#' @param var_min,var_max Range for node-specific noise standard deviations.
+#' @param outlier_nodes Vector of node indices to contaminate.
+#' @param b Number of contaminated cells per node (scalar or length(outlier_nodes)).
+#' @param overlap_mode Overlap pattern between contaminated nodes.
+#' @param overlap_fraction Shared-outlier ratio used when overlap_mode = "fraction".
+#' @param union_rows Candidate row indices when overlap_mode = "custom_union".
+#' @param Y_custom Custom contamination mask when overlap_mode = "custom_mask".
+#' @param ensure_disjoint_rest Avoid additional overlap outside the shared block.
+#' @param dist Distribution for contaminated entries.
+#' @param out_mean,out_scale Parameters for the contamination distribution.
+#' @param seed RNG seed.
+#'
+#' @return A list with observed data `Z`, clean data `X_clean`, contamination
+#'         mask `Y`, and descriptive statistics.
+CCLSM_generate <- function(
+    n,
+    B,
+    var_min = 1,
+    var_max = 1,
+    outlier_nodes = NULL,
+    b = 0,
+    overlap_mode = c("independent", "shared", "fraction", "custom_union", "custom_mask"),
+    overlap_fraction = 0,
+    union_rows = NULL,
+    Y_custom = NULL,
+    ensure_disjoint_rest = TRUE,
+    dist = c("Gaussian", "t", "Laplace", "Uniform"),
+    out_mean = 1e3,
+    out_scale = 1,
+    seed = 1
+) {
+  set.seed(seed)
+  overlap_mode <- match.arg(overlap_mode)
+  dist <- match.arg(dist)
+
+  if (!is.matrix(B)) {
+    stop("B must be a matrix")
+  }
+  p <- ncol(B)
+
+  ## ---------- Clean data X ----------
+  noise_sd <- runif(p, min = var_min, max = var_max)
+  X <- matrix(0, n, p)
+  for (i in seq_len(p)) {
+    if (i > 1) {
+      pa <- which(B[i, seq_len(i - 1), drop = FALSE] != 0)
+    } else {
+      pa <- integer(0)
+    }
+    mu <- if (length(pa) == 0) 0 else X[, pa, drop = FALSE] %*% B[i, pa]
+    X[, i] <- rnorm(n, mean = as.vector(mu), sd = noise_sd[i])
+  }
+
+  ## ---------- Contamination mask Y ----------
+  Y <- matrix(0L, n, p)
+
+  if (overlap_mode == "custom_mask") {
+    if (is.null(Y_custom)) {
+      stop("Provide Y_custom for custom_mask mode")
+    }
+    if (!all(dim(Y_custom) == c(n, p))) {
+      stop("Y_custom must be n x p")
+    }
+    if (!all(Y_custom %in% c(0, 1))) {
+      stop("Y_custom must be 0/1")
+    }
+    Y <- Y_custom
+  } else if (!is.null(outlier_nodes) && length(outlier_nodes) > 0) {
+    if (!is.numeric(b)) {
+      stop("b must be numeric")
+    }
+    if (length(b) == 1L) {
+      b <- rep(b, length(outlier_nodes))
+    }
+    if (length(b) != length(outlier_nodes)) {
+      stop("length(b) must equal length(outlier_nodes) or be scalar")
+    }
+    if (any(b > n)) {
+      stop("b cannot exceed n")
+    }
+
+    rlaplace <- function(m, loc = 0, scale = 1) {
+      u <- runif(m, -0.5, 0.5)
+      loc - scale * sign(u) * log(1 - 2 * abs(u))
+    }
+    gen_outliers <- function(m) {
+      switch(
+        dist,
+        "Gaussian" = rnorm(m, mean = out_mean, sd = out_scale),
+        "t" = out_mean + out_scale * rt(m, df = 3),
+        "Laplace" = rlaplace(m, loc = out_mean, scale = out_scale),
+        "Uniform" = runif(m, min = out_mean - out_scale, max = out_mean + out_scale)
+      )
+    }
+
+    if (overlap_mode == "independent") {
+      for (idx in seq_along(outlier_nodes)) {
+        k <- outlier_nodes[idx]
+        bk <- b[idx]
+        if (bk > 0) {
+          Y[sample.int(n, bk), k] <- 1L
+        }
+      }
+    } else if (overlap_mode == "shared") {
+      b_shared <- min(b)
+      shared_rows <- if (b_shared > 0) sample.int(n, b_shared) else integer(0)
+      for (k in outlier_nodes) {
+        if (length(shared_rows)) {
+          Y[shared_rows, k] <- 1L
+        }
+      }
+      for (idx in seq_along(outlier_nodes)) {
+        k <- outlier_nodes[idx]
+        extra <- b[idx] - b_shared
+        if (extra > 0) {
+          rest <- setdiff(seq_len(n), shared_rows)
+          Y[sample(rest, extra), k] <- 1L
+        }
+      }
+    } else if (overlap_mode == "fraction") {
+      if (overlap_fraction < 0 || overlap_fraction > 1) {
+        stop("overlap_fraction must be in [0,1]")
+      }
+      base_b <- min(b)
+      b_shared <- round(overlap_fraction * base_b)
+      shared_rows <- if (b_shared > 0) sample.int(n, b_shared) else integer(0)
+      for (k in outlier_nodes) {
+        if (length(shared_rows)) {
+          Y[shared_rows, k] <- 1L
+        }
+      }
+      for (idx in seq_along(outlier_nodes)) {
+        k <- outlier_nodes[idx]
+        need <- b[idx] - b_shared
+        if (need > 0) {
+          if (ensure_disjoint_rest) {
+            already <- which(rowSums(Y) > 0)
+            candidates <- setdiff(seq_len(n), union(shared_rows, already))
+            take <- min(length(candidates), need)
+            sel <- if (take > 0) sample(candidates, take) else integer(0)
+            if (length(sel)) {
+              Y[sel, k] <- 1L
+            }
+            remaining <- need - take
+            if (remaining > 0) {
+              rest <- setdiff(seq_len(n), c(shared_rows, sel))
+              Y[sample(rest, remaining), k] <- 1L
+            }
+          } else {
+            rest <- setdiff(seq_len(n), shared_rows)
+            Y[sample(rest, need), k] <- 1L
+          }
+        }
+      }
+    } else if (overlap_mode == "custom_union") {
+      if (is.null(union_rows)) {
+        stop("Provide union_rows for custom_union mode")
+      }
+      union_rows <- sort(unique(union_rows))
+      if (!all(union_rows %in% seq_len(n))) {
+        stop("union_rows must be within 1..n")
+      }
+      for (idx in seq_along(outlier_nodes)) {
+        k <- outlier_nodes[idx]
+        bk <- b[idx]
+        if (bk > length(union_rows)) {
+          stop("b cannot exceed length(union_rows)")
+        }
+        if (bk > 0) {
+          Y[sample(union_rows, bk), k] <- 1L
+        }
+      }
+    }
+  }
+
+  ## ---------- Apply contamination ----------
+  rlaplace <- function(m, loc = 0, scale = 1) {
+    u <- runif(m, -0.5, 0.5)
+    loc - scale * sign(u) * log(1 - 2 * abs(u))
+  }
+  gen_outliers <- function(m) {
+    switch(
+      dist,
+      "Gaussian" = rnorm(m, mean = out_mean, sd = out_scale),
+      "t" = out_mean + out_scale * rt(m, df = 3),
+      "Laplace" = rlaplace(m, loc = out_mean, scale = out_scale),
+      "Uniform" = runif(m, min = out_mean - out_scale, max = out_mean + out_scale)
+    )
+  }
+
+  Z <- X
+  idx_out <- which(Y == 1L, arr.ind = TRUE)
+  if (nrow(idx_out) > 0) {
+    Z[idx_out] <- gen_outliers(nrow(idx_out))
+  }
+
+  per_node <- colSums(Y)
+  per_row <- rowSums(Y)
+  union_size <- sum(per_row > 0)
+  summary <- list(
+    per_node = per_node,
+    per_row = per_row,
+    union_size = union_size,
+    overlap_mode = overlap_mode,
+    overlap_fraction = overlap_fraction
+  )
+
+  list(
+    Z = Z,
+    X_clean = X,
+    Y = Y,
+    summary = summary,
+    noise_sd = noise_sd
+  )
+}
+
+#' Wrapper to mimic LTS_GSEM_generator signature using CCLSM_generate
+#'
+#' This helper samples a DAG internally and returns a list compatible with
+#' downstream scripts that previously consumed LTS_GSEM_generator outputs.
+CCLSM_generator <- function(
+    n,
+    p,
+    d = 2,
+    b = 0,
+    outlier_nodes = NULL,
+    var_Min = 1,
+    var_Max = 1,
+    dist = "Gaussian",
+    beta_min,
+    beta_max,
+    graph_type,
+    q = 0.025,
+    h = 1,
+    structure = NULL,
+    seed = 1,
+    overlap_mode = "independent",
+    overlap_fraction = 0,
+    union_rows = NULL,
+    Y_custom = NULL,
+    ensure_disjoint_rest = TRUE,
+    out_mean = 1e3,
+    out_scale = 1
+) {
+  graph <- Graph_Generator(p, d, graph_type, beta_min, beta_max, q, h, seed = seed, structure)$B
+  generated <- CCLSM_generate(
+    n = n,
+    B = graph,
+    var_min = var_Min,
+    var_max = var_Max,
+    outlier_nodes = outlier_nodes,
+    b = b,
+    overlap_mode = overlap_mode,
+    overlap_fraction = overlap_fraction,
+    union_rows = union_rows,
+    Y_custom = Y_custom,
+    ensure_disjoint_rest = ensure_disjoint_rest,
+    dist = dist,
+    out_mean = out_mean,
+    out_scale = out_scale,
+    seed = seed
+  )
+
+  list(
+    x = generated$Z,
+    true_Matrix = graph,
+    Y = generated$Y,
+    X_clean = generated$X_clean,
+    summary = generated$summary,
+    noise_sd = generated$noise_sd
+  )
+}
