@@ -135,7 +135,7 @@ synthetic_data <- CCLSM_generator(
 )
 graph = synthetic_data$true_Matrix
 toy_data <- synthetic_data$x
-Y_mask = synthetic_data$Y
+Y_mask = synthetic_data$y
 str(synthetic_data$summary)
 par(mfrow = c(3,1))
 
@@ -261,8 +261,7 @@ CCLSM_simulation_fun <- function(
     gsem_max_degree = d,
     gds_startAt = "emptyGraph",
     save_data = FALSE,
-    generator_output = NULL,
-    ...
+    generator_output = NULL
 ) {
   set.seed(seed)
   gen <- generator_output
@@ -286,8 +285,7 @@ CCLSM_simulation_fun <- function(
       Y_custom = Y_custom,
       ensure_disjoint_rest = ensure_disjoint_rest,
       out_mean = out_mean,
-      out_scale = out_scale,
-      ...
+      out_scale = out_scale
     )
   }
 
@@ -299,6 +297,10 @@ CCLSM_simulation_fun <- function(
   graph <- gen$true_Matrix
   n_real <- nrow(data)
   p_real <- ncol(data)
+  contamination_mask <- if ("y" %in% names(gen)) gen$y else gen$Y
+  if (is.null(contamination_mask)) {
+    contamination_mask <- matrix(0, n_real, p_real)
+  }
 
   if (is.null(gsem_alpha)) {
     gsem_alpha <- max(c(1 - pnorm(n_real^(1/3) / 2), 0))
@@ -381,19 +383,21 @@ CCLSM_simulation_fun <- function(
     seed = seed,
     data = if (save_data) data else NULL,
     graph = graph,
-    contamination = list(Y = gen$Y, summary = gen$summary),
+    contamination = list(Y = contamination_mask, summary = gen$summary),
     evaluations = metrics,
     raw_results = results
   )
 }
 
 #' Future 기반 병렬 실행으로 여러 시드를 반복 평가한다.
+#'
+#' @param sim_args `CCLSM_simulation_fun()`에 전달할 인자 목록.
 run_parallel_CCLSM <- function(
     seeds,
     workers = future::availableCores(),
     plan = c("multisession", "multicore", "sequential"),
     progress_format = "[:bar] :percent | elapsed: :elapsed | eta: :eta | :message",
-    ...
+    sim_args = list()
 ) {
   plan <- match.arg(plan)
   total_steps <- length(seeds)
@@ -421,7 +425,8 @@ run_parallel_CCLSM <- function(
     p <- progressr::progressor(steps = total_steps)
     future.apply::future_lapply(seq_along(seeds), function(idx) {
       seed <- seeds[idx]
-      res <- CCLSM_simulation_fun(seed = seed, ...)
+      args <- modifyList(sim_args, list(seed = seed))
+      res <- do.call(CCLSM_simulation_fun, args)
       elapsed_sec <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
       remaining_est <- max(total_steps - idx, 0)
       eta_sec <- if (idx > 0) (elapsed_sec / idx) * remaining_est else NA_real_
@@ -456,16 +461,18 @@ if (interactive()) {
     seeds = example_seeds,
     plan = "sequential",
     workers = 1,
-    n_real = n,
-    p_real = p,
-    d = d,
-    beta_min = beta_min,
-    beta_max = beta_max,
-    graph_type = graph_type,
-    b = b,
-    outlier_nodes = outlier_node,
-    h_ratio = 0.5,
-    thresh = 10
+    sim_args = list(
+      n_real = n,
+      p_real = p,
+      d = d,
+      beta_min = beta_min,
+      beta_max = beta_max,
+      graph_type = graph_type,
+      b = b,
+      outlier_nodes = outlier_node,
+      h_ratio = 0.5,
+      thresh = 10
+    )
   )
   simulation_summary <- bind_simulation_metrics(parallel_results)
   print(head(simulation_summary))

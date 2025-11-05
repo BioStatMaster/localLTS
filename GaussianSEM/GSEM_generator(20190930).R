@@ -637,8 +637,8 @@ compute_topological_order <- function(B) {
 #' @param out_mean,out_scale Parameters for the contamination distribution.
 #' @param seed RNG seed.
 #'
-#' @return A list containing contaminated observations `x`, clean data
-#'   `X_clean`, contamination mask `Y`, and summary statistics.
+#' @return A list containing contaminated observations `x`, contamination
+#'   mask `y`, and summary statistics.
 CCLSM_generate <- function(
     n,
     B,
@@ -799,7 +799,6 @@ CCLSM_generate <- function(
 
   ## ---------- (3) Structural propagation ----------
   Z <- matrix(0, n, p)
-  Z_clean <- matrix(0, n, p)
   for (j in topo) {
     parents <- which(B[j, ] != 0)
     mu <- if (length(parents) == 0) {
@@ -808,15 +807,12 @@ CCLSM_generate <- function(
       Z[, parents, drop = FALSE] %*% B[j, parents]
     }
     z_j <- rnorm(n, mean = as.vector(mu), sd = noise_sd[j])
-    z_clean <- z_j
-
     rows_j <- which(Y[, j] == 1L)
     if (length(rows_j) > 0) {
       z_j[rows_j] <- gen_outliers(length(rows_j))
     }
 
     Z[, j] <- z_j
-    Z_clean[, j] <- z_clean
   }
 
   ## ---------- (4) Summary ----------
@@ -835,8 +831,6 @@ CCLSM_generate <- function(
 
   list(
     x = as.data.frame(Z),
-    X_clean = as.data.frame(Z_clean),
-    Y = Y,
     y = Y,
     true_Matrix = B,
     summary = summary,
@@ -894,9 +888,7 @@ CCLSM_generator <- function(
   list(
     x = generated$x,
     true_Matrix = graph,
-    Y = generated$Y,
     y = generated$y,
-    X_clean = generated$X_clean,
     summary = generated$summary,
     noise_sd = generated$noise_sd
   )
