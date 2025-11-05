@@ -149,8 +149,32 @@ res3 = HLSEM_Algorithm(data, sparsity_level = 2, CV = F, graph = graph)
 res4 = HGSEM_Algorithm(data, alpha = alpha, sparsity_level = 2 , graph = graph)
 res5 = TD(data, q = d, graph = graph)
 
-res = cbind( RGSM = res1[[1]], US = res2[[1]], HLSM = res5[[1]], HGSM = res4[[1]], TD = res5[[1]] )
+res = cbind(
+  LTS = res1[[1]],
+  US = res2[[1]],
+  HLSEM = res3[[1]],
+  HGSEM = res4[[1]],
+  TD = res5[[1]]
+)
 cbind( round( res, 3)[c(1,2,13:17),])
+
+####### 단일 함수 기반 파이프라인 테스트 ########
+toy_simulation <- CCLSM_simulation_fun(
+  seed = seed,
+  n_real = n,
+  p_real = p,
+  d = d,
+  beta_min = beta_min,
+  beta_max = beta_max,
+  graph_type = graph_type,
+  b = b,
+  outlier_nodes = outlier_node,
+  h_ratio = 0.5,
+  thresh = 10,
+  generator_output = synthetic.graph,
+  save_data = TRUE
+)
+head(toy_simulation$evaluations)
 
 
 
@@ -159,6 +183,7 @@ cbind( round( res, 3)[c(1,2,13:17),])
 
 ############# Future 기반 병렬 시뮬레이션 #################
 
+#' 시뮬레이션에서 사용할 평가 지표 이름 목록
 evaluation_metric_names <- c(
   "precisition", "recall", "precisition_edge", "recall_edge",
   "true_positives", "true_negatives", "false_positives", "false_negatives",
@@ -167,6 +192,7 @@ evaluation_metric_names <- c(
   "true_graph_total_edges", "estimated_graph_total_edges"
 )
 
+#' 초 단위 시간을 `HH:MM:SS.ss` 문자열로 변환한다.
 format_duration <- function(seconds) {
   if (is.na(seconds) || is.infinite(seconds)) {
     return("NA")
@@ -178,6 +204,7 @@ format_duration <- function(seconds) {
   sprintf("%02d:%02d:%05.2f", hrs, mins, secs)
 }
 
+#' 알고리즘 수행 결과에서 평가 지표 한 행을 생성한다.
 build_metric_row <- function(name, result) {
   metrics <- setNames(rep(NA_real_, length(evaluation_metric_names)), evaluation_metric_names)
   if (!is.null(result$DAG_Evaluation)) {
@@ -196,6 +223,7 @@ build_metric_row <- function(name, result) {
   row
 }
 
+#' 오류가 발생하더라도 기본 구조를 유지하도록 알고리즘 호출을 감싼다.
 safe_algorithm_call <- function(expr) {
   tryCatch(expr, error = function(e) {
     list(
@@ -210,6 +238,10 @@ safe_algorithm_call <- function(expr) {
   })
 }
 
+#' CCLSM 기반 데이터 생성과 알고리즘 평가를 한 번에 수행한다.
+#'
+#' @param generator_output `CCLSM_generator()`가 반환한 결과. 제공되면
+#'   새로운 데이터를 생성하지 않고 이 객체를 그대로 사용한다.
 CCLSM_simulation_fun <- function(
     seed,
     n_real,
@@ -240,34 +272,44 @@ CCLSM_simulation_fun <- function(
     gsem_max_degree = d,
     gds_startAt = "emptyGraph",
     save_data = FALSE,
+    generator_output = NULL,
     ...
 ) {
   set.seed(seed)
-  gen <- CCLSM_generator(
-    n = n_real,
-    p = p_real,
-    d = d,
-    b = b,
-    outlier_nodes = outlier_nodes,
-    var_Min = var_Min,
-    var_Max = var_Max,
-    dist = dist,
-    beta_min = beta_min,
-    beta_max = beta_max,
-    graph_type = graph_type,
-    seed = seed,
-    overlap_mode = overlap_mode,
-    overlap_fraction = overlap_fraction,
-    union_rows = union_rows,
-    Y_custom = Y_custom,
-    ensure_disjoint_rest = ensure_disjoint_rest,
-    out_mean = out_mean,
-    out_scale = out_scale,
-    ...
-  )
+  gen <- generator_output
+  if (is.null(gen)) {
+    gen <- CCLSM_generator(
+      n = n_real,
+      p = p_real,
+      d = d,
+      b = b,
+      outlier_nodes = outlier_nodes,
+      var_Min = var_Min,
+      var_Max = var_Max,
+      dist = dist,
+      beta_min = beta_min,
+      beta_max = beta_max,
+      graph_type = graph_type,
+      seed = seed,
+      overlap_mode = overlap_mode,
+      overlap_fraction = overlap_fraction,
+      union_rows = union_rows,
+      Y_custom = Y_custom,
+      ensure_disjoint_rest = ensure_disjoint_rest,
+      out_mean = out_mean,
+      out_scale = out_scale,
+      ...
+    )
+  }
 
-  data <- as.data.frame(gen$x)
+  if (!all(c("x", "true_Matrix") %in% names(gen))) {
+    stop("generator_output must contain 'x' and 'true_Matrix'")
+  }
+
+  data <- if (is.data.frame(gen$x)) gen$x else as.data.frame(gen$x)
   graph <- gen$true_Matrix
+  n_real <- nrow(data)
+  p_real <- ncol(data)
 
   if (is.null(gsem_alpha)) {
     gsem_alpha <- max(c(1 - pnorm(n_real^(1/3) / 2), 0))
@@ -356,6 +398,7 @@ CCLSM_simulation_fun <- function(
   )
 }
 
+#' Future 기반 병렬 실행으로 여러 시드를 반복 평가한다.
 run_parallel_CCLSM <- function(
     seeds,
     workers = future::availableCores(),
@@ -405,6 +448,7 @@ run_parallel_CCLSM <- function(
   })
 }
 
+#' 시뮬레이션 결과 리스트를 단일 데이터 프레임으로 변환한다.
 bind_simulation_metrics <- function(sim_results) {
   if (length(sim_results) == 0) {
     return(data.frame())
