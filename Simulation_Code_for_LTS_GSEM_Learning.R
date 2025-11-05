@@ -549,6 +549,12 @@ construct_output_filename <- function(prefix, combo, num_out) {
       num_out
     )
   }
+  metrics <- lapply(sim_results, function(res) {
+    df <- res$evaluations
+    df$seed <- res$seed
+    df
+  })
+  do.call(rbind, metrics)
 }
 
 #' Persist algorithm-specific results to disk.
