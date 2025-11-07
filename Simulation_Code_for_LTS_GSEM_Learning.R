@@ -608,6 +608,29 @@ construct_output_filename <- function(prefix, combo, num_out) {
       num_out
     )
   }
+
+  progressr::handlers(global = TRUE, progressr::handler_progress(format = progress_format))
+  start_time <- Sys.time()
+
+  progressr::with_progress({
+    p <- progressr::progressor(steps = total_steps)
+    future.apply::future_lapply(seq_along(seeds), function(idx) {
+      seed <- seeds[idx]
+      args <- modifyList(sim_args, list(seed = seed))
+      res <- do.call(CCLSM_simulation_fun, args)
+      elapsed_sec <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+      remaining_est <- max(total_steps - idx, 0)
+      eta_sec <- if (idx > 0) (elapsed_sec / idx) * remaining_est else NA_real_
+      msg <- sprintf(
+        "seed %d | elapsed %s | eta %s",
+        seed,
+        format_duration(elapsed_sec),
+        format_duration(eta_sec)
+      )
+      p(message = msg)
+      res
+    }, future.seed = TRUE)
+  })
 }
 
 #' Persist algorithm-specific results to disk.
@@ -692,6 +715,12 @@ resolve_spec <- function(spec, combo) {
   } else {
     spec
   }
+  metrics <- lapply(sim_results, function(res) {
+    df <- res$evaluations
+    df$seed <- res$seed
+    df
+  })
+  do.call(rbind, metrics)
 }
 
 #' Collapse node-wise contamination counts to a single scalar for naming.
