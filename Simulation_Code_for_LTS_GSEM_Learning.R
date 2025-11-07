@@ -27,176 +27,38 @@ source("Evaluation_Algorithm(20181005).R")
 
 ############
 #### Packages ####
-if(!require(Rcpp)){
-  install.packages("Rcpp")
-  library(Rcpp)
-}
-if(!require(pcalg)){
-  install.packages("pcalg")
-  library(pcalg)
-}
-if(!require(MASS)){
-  install.packages("MASS")
-  library(MASS)
-}
-if(!require(gtools)){
-  install.packages("gtools")
-  library(gtools)
-}
-if(!require(graph)){
-  install.packages("graph")
-  library(graph)
-}
-if(!require(dplyr)){
-  install.packages("dplyr")
-  library(dplyr)
-}
-if(!require(plyr)){
-  install.packages("plyr")
-  library(plyr)
-}
-if(!require(future)){
-  install.packages("future")
-  library(future)
-}
-if(!require(future.apply)){
-  install.packages("future.apply")
-  library(future.apply)
-}
-if(!require(progressr)){
-  install.packages("progressr")
-  library(progressr)
-}
-if(!require(hypergeo)){
-  install.packages("hypergeo")
-  library(hypergeo)
-}
-if(!require(glmnet)){
-  install.packages("glmnet")
-  library(glmnet)
-}
-if(!require(gamlss)){
-  install.packages("gamlss")
-  library(gamlss)
-}
-if(!require(bnlearn)){
-  install.packages("bnlearn")
-  library(bnlearn)
-}
-library(compiler)
-if(!require(rmutil)){
-  install.packages("rmutil")
-  library(rmutil)
-}
-if(!require(CombMSC)){
-  install.packages("CombMSC")
-  library(CombMSC)
-}
-
-source("https://bioconductor.org/biocLite.R")
-if(!require(Rgraphviz)){
-  biocLite("Rgraphviz")
-  n
-  library(Rgraphviz)
-}
-if(!require(RBGL)){
-  biocLite("RBGL")
-  n
-  library(RBGL)
-}
-if(!require(graph)){
-  biocLite("graph")
-  n
-  library(graph)
-}
-
-#########################
-#### Data Generation ####
-########################
-
-#### Simulation Settings for Toy Example #####
-p = 20; n = 50; d = 1; seed = sample(1:100, 1);
-beta_min = 1.00; beta_max = 1.00;
-graph_type = 5
-alpha = 1* max( c( 1 - pnorm( n^(1/3)/2 ), 0.1^100 * 1 ) )
-
-outlier_node = 1
-b = 1
-synthetic_data <- CCLSM_generator(
-  n = n,
-  p = p,
-  d = d,
-  b = b,
-  outlier_nodes = outlier_node,
-  var_Min = 0.75,
-  var_Max = 0.75,
-  dist = "Gaussian",
-  beta_min = beta_min,
-  beta_max = beta_max,
-  graph_type = graph_type,
-  q = 0.025,
-  h = 1,
-  seed = seed
-)
-graph = synthetic_data$true_Matrix
-toy_data <- synthetic_data$x
-Y_mask = synthetic_data$y
-str(synthetic_data$summary)
-par(mfrow = c(3,1))
-
-colSums(graph!=0)
-
-boxplot(toy_data)
-barplot( sapply(toy_data, mean))
-barplot( sapply(toy_data, var))
-
-####### 단일 함수 기반 파이프라인 테스트 ########
-toy_simulation <- CCLSM_simulation_fun(
-  seed = seed,
-  n_real = n,
-  p_real = p,
-  d = d,
-  beta_min = beta_min,
-  beta_max = beta_max,
-  graph_type = graph_type,
-  b = b,
-  outlier_nodes = outlier_node,
-  h_ratio = 0.5,
-  thresh = 10,
-  gsem_alpha = alpha,
-  generator_output = synthetic_data,
-  save_data = TRUE
-)
-toy_metrics <- toy_simulation$evaluations
-print(head(toy_metrics))
-
-
-
-
-
-
-############# Future 기반 병렬 시뮬레이션 #################
-
-#' 시뮬레이션에서 사용할 평가 지표 이름 목록
-evaluation_metric_names <- c(
-  "precisition", "recall", "precisition_edge", "recall_edge",
-  "true_positives", "true_negatives", "false_positives", "false_negatives",
-  "true_positives_edge", "true_negatives_edge", "false_positives_edge", "false_negatives_edge",
-  "hamming_dist", "hamming_dist_edge", "hamming_dist_ordering",
-  "true_graph_total_edges", "estimated_graph_total_edges"
-)
-
-#' 초 단위 시간을 `HH:MM:SS.ss` 문자열로 변환한다.
-format_duration <- function(seconds) {
-  if (is.na(seconds) || is.infinite(seconds)) {
-    return("NA")
+#' Attempt to load an optional dependency without triggering installations.
+#'
+#' @param package Package name as a string.
+#' @param attach Whether to call `library()` when the package is available.
+load_optional_package <- function(package, attach = TRUE) {
+  if (requireNamespace(package, quietly = TRUE)) {
+    if (attach) {
+      library(package, character.only = TRUE)
+    }
+    TRUE
+  } else {
+    warning(sprintf("Package '%s' is not available. Related functionality may be skipped.", package))
+    FALSE
   }
-  seconds <- max(seconds, 0)
-  hrs <- floor(seconds / 3600)
-  mins <- floor((seconds %% 3600) / 60)
-  secs <- seconds %% 60
-  sprintf("%02d:%02d:%05.2f", hrs, mins, secs)
 }
+
+optional_packages <- c(
+  "Rcpp", "pcalg", "MASS", "gtools", "graph", "dplyr", "plyr", "future",
+  "future.apply", "progressr", "hypergeo", "glmnet", "gamlss", "bnlearn",
+  "rmutil", "CombMSC"
+)
+loaded_optional <- vapply(optional_packages, load_optional_package, logical(1))
+rm(loaded_optional, optional_packages)
+
+library(compiler)
+
+# Bioconductor packages are also optional; skip attempts to download in offline environments.
+load_optional_package("Rgraphviz")
+load_optional_package("RBGL")
+load_optional_package("graph")
+
+############# 공통 유틸리티 함수 #############
 
 #' 알고리즘 수행 결과에서 평가 지표 한 행을 생성한다.
 build_metric_row <- function(name, result) {
@@ -232,10 +94,39 @@ safe_algorithm_call <- function(expr) {
   })
 }
 
+#########################
+#### Data Generation ####
+########################
+
+############# Future 기반 병렬 시뮬레이션 #################
+
+#' 시뮬레이션에서 사용할 평가 지표 이름 목록
+evaluation_metric_names <- c(
+  "precisition", "recall", "precisition_edge", "recall_edge",
+  "true_positives", "true_negatives", "false_positives", "false_negatives",
+  "true_positives_edge", "true_negatives_edge", "false_positives_edge", "false_negatives_edge",
+  "hamming_dist", "hamming_dist_edge", "hamming_dist_ordering",
+  "true_graph_total_edges", "estimated_graph_total_edges"
+)
+
+#' 초 단위 시간을 `HH:MM:SS.ss` 문자열로 변환한다.
+format_duration <- function(seconds) {
+  if (is.na(seconds) || is.infinite(seconds)) {
+    return("NA")
+  }
+  seconds <- max(seconds, 0)
+  hrs <- floor(seconds / 3600)
+  mins <- floor((seconds %% 3600) / 60)
+  secs <- seconds %% 60
+  sprintf("%02d:%02d:%05.2f", hrs, mins, secs)
+}
+
 #' CCLSM 기반 데이터 생성과 알고리즘 평가를 한 번에 수행한다.
-#'
+#' 
 #' @param generator_output `CCLSM_generator()`가 반환한 결과. 제공되면
 #'   새로운 데이터를 생성하지 않고 이 객체를 그대로 사용한다.
+#' @param fixed_graph 사전 생성한 그래프 행렬. 제공 시 동일한 구조를
+#'   유지한 채 데이터를 시뮬레이션한다.
 CCLSM_simulation_fun <- function(
     seed,
     n_real,
@@ -266,32 +157,53 @@ CCLSM_simulation_fun <- function(
     gsem_max_degree = d,
     gds_startAt = "emptyGraph",
     save_data = FALSE,
-    generator_output = NULL
+    generator_output = NULL,
+    fixed_graph = NULL
 ) {
   set.seed(seed)
   gen <- generator_output
   if (is.null(gen)) {
-    gen <- CCLSM_generator(
-      n = n_real,
-      p = p_real,
-      d = d,
-      b = b,
-      outlier_nodes = outlier_nodes,
-      var_Min = var_Min,
-      var_Max = var_Max,
-      dist = dist,
-      beta_min = beta_min,
-      beta_max = beta_max,
-      graph_type = graph_type,
-      seed = seed,
-      overlap_mode = overlap_mode,
-      overlap_fraction = overlap_fraction,
-      union_rows = union_rows,
-      Y_custom = Y_custom,
-      ensure_disjoint_rest = ensure_disjoint_rest,
-      out_mean = out_mean,
-      out_scale = out_scale
-    )
+    if (!is.null(fixed_graph)) {
+      gen <- CCLSM_generate(
+        n = n_real,
+        B = fixed_graph,
+        var_min = var_Min,
+        var_max = var_Max,
+        outlier_nodes = outlier_nodes,
+        b = b,
+        overlap_mode = overlap_mode,
+        overlap_fraction = overlap_fraction,
+        union_rows = union_rows,
+        Y_custom = Y_custom,
+        ensure_disjoint_rest = ensure_disjoint_rest,
+        dist = dist,
+        out_mean = out_mean,
+        out_scale = out_scale,
+        seed = seed
+      )
+    } else {
+      gen <- CCLSM_generator(
+        n = n_real,
+        p = p_real,
+        d = d,
+        b = b,
+        outlier_nodes = outlier_nodes,
+        var_Min = var_Min,
+        var_Max = var_Max,
+        dist = dist,
+        beta_min = beta_min,
+        beta_max = beta_max,
+        graph_type = graph_type,
+        seed = seed,
+        overlap_mode = overlap_mode,
+        overlap_fraction = overlap_fraction,
+        union_rows = union_rows,
+        Y_custom = Y_custom,
+        ensure_disjoint_rest = ensure_disjoint_rest,
+        out_mean = out_mean,
+        out_scale = out_scale
+      )
+    }
   }
 
   if (!all(c("x", "true_Matrix") %in% names(gen))) {
@@ -305,6 +217,27 @@ CCLSM_simulation_fun <- function(
   contamination_mask <- if ("y" %in% names(gen)) gen$y else gen$Y
   if (is.null(contamination_mask)) {
     contamination_mask <- matrix(0, n_real, p_real)
+  }
+
+  contamination_nodes <- if (!is.null(outlier_nodes) && length(outlier_nodes) > 0) {
+    sort(unique(outlier_nodes))
+  } else {
+    sort(unique(which(colSums(contamination_mask) > 0)))
+  }
+  contamination_details <- summarise_contamination_nodes(graph, contamination_nodes)
+
+  format_metadata_strings <- function(details, field) {
+    if (length(details) == 0) {
+      return("")
+    }
+    paste(vapply(details, function(entry) {
+      values <- entry[[field]]
+      if (length(values) == 0) {
+        sprintf("%d: none", entry$node)
+      } else {
+        sprintf("%d: %s", entry$node, paste(values, collapse = ","))
+      }
+    }, character(1)), collapse = " | ")
   }
 
   if (is.null(gsem_alpha)) {
@@ -383,12 +316,19 @@ CCLSM_simulation_fun <- function(
     })
   )
   metrics$seed <- seed
+  metrics$contaminated_nodes <- if (length(contamination_nodes) == 0) "" else paste(contamination_nodes, collapse = ",")
+  metrics$Pa_j <- format_metadata_strings(contamination_details, "Pa_j")
+  metrics$ancestor_union <- format_metadata_strings(contamination_details, "ancestor_union")
 
   list(
     seed = seed,
     data = if (save_data) data else NULL,
     graph = graph,
-    contamination = list(Y = contamination_mask, summary = gen$summary),
+    contamination = list(
+      Y = contamination_mask,
+      summary = gen$summary,
+      node_details = contamination_details
+    ),
     evaluations = metrics,
     raw_results = results
   )
@@ -423,7 +363,8 @@ run_parallel_CCLSM <- function(
     future::plan(future::sequential)
   }
 
-  progressr::handlers(global = TRUE, progressr::handler_progress(format = progress_format))
+  handler <- progressr::handler_progress(format = progress_format)
+  progressr::handlers(handler)
   start_time <- Sys.time()
 
   progressr::with_progress({
@@ -446,6 +387,68 @@ run_parallel_CCLSM <- function(
     }, future.seed = TRUE)
   })
 }
+
+# 데이터 생성 및 단일 시뮬레이션 예제 -----------------------------------------
+
+#### Simulation Settings for Toy Example #####
+p <- 20
+n <- 50
+d <- 1
+seed <- sample(1:100, 1)
+beta_min <- 1.00
+beta_max <- 1.00
+graph_type <- 5
+alpha <- max(c(1 - pnorm(n^(1/3) / 2), 0))
+
+outlier_node <- 1
+b <- 1
+synthetic_data <- CCLSM_generator(
+  n = n,
+  p = p,
+  d = d,
+  b = b,
+  outlier_nodes = outlier_node,
+  var_Min = 0.75,
+  var_Max = 0.75,
+  dist = "Gaussian",
+  beta_min = beta_min,
+  beta_max = beta_max,
+  graph_type = graph_type,
+  q = 0.025,
+  h = 1,
+  seed = seed
+)
+graph <- synthetic_data$true_Matrix
+toy_data <- synthetic_data$x
+Y_mask <- synthetic_data$y
+str(synthetic_data$summary)
+par(mfrow = c(3, 1))
+
+colSums(graph != 0)
+
+boxplot(toy_data)
+barplot(sapply(toy_data, mean))
+barplot(sapply(toy_data, var))
+
+####### 단일 함수 기반 파이프라인 테스트 ########
+toy_simulation <- CCLSM_simulation_fun(
+  seed = seed,
+  n_real = n,
+  p_real = p,
+  d = d,
+  beta_min = beta_min,
+  beta_max = beta_max,
+  graph_type = graph_type,
+  b = b,
+  outlier_nodes = outlier_node,
+  h_ratio = 0.5,
+  thresh = 10,
+  gsem_alpha = alpha,
+  generator_output = synthetic_data,
+  save_data = TRUE
+)
+toy_metrics <- toy_simulation$evaluations
+print(head(toy_metrics))
 
 #' 시뮬레이션 결과 리스트를 단일 데이터 프레임으로 변환한다.
 bind_simulation_metrics <- function(sim_results) {
@@ -475,8 +478,63 @@ pad_metrics <- function(metrics, metric_names) {
   template
 }
 
-#' Build a single evaluation record for saving to disk.
+#' 주어진 인접행렬에서 특정 노드의 부모 집합을 반환한다.
 #'
+#' @param B 가중치 인접행렬.
+#' @param node 관심 노드 번호.
+#' @return 부모 노드 인덱스 벡터.
+get_parents <- function(B, node) {
+  which(B[node, ] != 0)
+}
+
+#' 여러 노드에 도달할 수 있는 모든 조상 노드를 계산한다.
+#'
+#' @param B 가중치 인접행렬.
+#' @param nodes 시작 노드 인덱스 벡터.
+#' @return 조상 노드 인덱스 벡터(중복 제거).
+get_ancestors <- function(B, nodes) {
+  if (length(nodes) == 0) {
+    return(integer(0))
+  }
+  p <- nrow(B)
+  visited <- rep(FALSE, p)
+  stack <- nodes
+  while (length(stack) > 0) {
+    current <- stack[[1]]
+    stack <- stack[-1]
+    parents <- which(B[current, ] != 0)
+    new_nodes <- parents[!visited[parents]]
+    if (length(new_nodes) > 0) {
+      visited[new_nodes] <- TRUE
+      stack <- c(stack, new_nodes)
+    }
+  }
+  which(visited)
+}
+
+#' 오염 노드, 그 부모, 그리고 해당 조상들의 정보를 정리한다.
+#'
+#' @param B 가중치 인접행렬.
+#' @param nodes 오염된 노드 인덱스 벡터.
+#' @return 각 노드별 메타데이터 리스트.
+summarise_contamination_nodes <- function(B, nodes) {
+  if (length(nodes) == 0) {
+    return(list())
+  }
+  lapply(as.integer(nodes), function(node) {
+    parents <- get_parents(B, node)
+    base_set <- unique(c(node, parents))
+    ancestor_union <- sort(unique(c(base_set, get_ancestors(B, base_set))))
+    list(
+      node = node,
+      Pa_j = parents,
+      ancestor_union = ancestor_union
+    )
+  })
+}
+
+#' Build a single evaluation record for saving to disk.
+#' 
 #' @param algorithm_result Output list from an algorithm run (e.g. LTS).
 #' @param metric_names Character vector describing metric order.
 #' @return List with four numeric entries so legacy loaders can index
@@ -489,7 +547,8 @@ build_evaluation_record <- function(algorithm_result, metric_names) {
     DAG = dag,
     MEC = mec,
     Oracle = oracle,
-    DAG_copy = dag
+    Estimated_DAG = if (!is.null(algorithm_result$DAG)) algorithm_result$DAG else NULL,
+    Ordering = if (!is.null(algorithm_result$Ordering)) algorithm_result$Ordering else NULL
   )
 }
 
@@ -549,12 +608,29 @@ construct_output_filename <- function(prefix, combo, num_out) {
       num_out
     )
   }
-  metrics <- lapply(sim_results, function(res) {
-    df <- res$evaluations
-    df$seed <- res$seed
-    df
+
+  progressr::handlers(global = TRUE, progressr::handler_progress(format = progress_format))
+  start_time <- Sys.time()
+
+  progressr::with_progress({
+    p <- progressr::progressor(steps = total_steps)
+    future.apply::future_lapply(seq_along(seeds), function(idx) {
+      seed <- seeds[idx]
+      args <- modifyList(sim_args, list(seed = seed))
+      res <- do.call(CCLSM_simulation_fun, args)
+      elapsed_sec <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+      remaining_est <- max(total_steps - idx, 0)
+      eta_sec <- if (idx > 0) (elapsed_sec / idx) * remaining_est else NA_real_
+      msg <- sprintf(
+        "seed %d | elapsed %s | eta %s",
+        seed,
+        format_duration(elapsed_sec),
+        format_duration(eta_sec)
+      )
+      p(message = msg)
+      res
+    }, future.seed = TRUE)
   })
-  do.call(rbind, metrics)
 }
 
 #' Persist algorithm-specific results to disk.
@@ -603,13 +679,22 @@ persist_simulation_results <- function(
     combo,
     num_out,
     seeds,
-    metric_names) {
+    metric_names,
+    extra_metadata = list()) {
   per_algorithm <- split_results_by_algorithm(sim_results, metric_names)
   saved_paths <- vapply(names(per_algorithm), function(algo) {
     records <- per_algorithm[[algo]]
     if (length(records) == 0) {
       return(NA_character_)
     }
+    metadata <- modifyList(extra_metadata, list(
+      n_real = combo$n_real,
+      p_real = combo$p_real,
+      d = combo$d,
+      h_ratio = combo$h_ratio,
+      thresh = combo$thresh,
+      num_out = num_out
+    ))
     save_algorithm_results(
       directory = output_dir,
       algorithm = algo,
@@ -617,14 +702,7 @@ persist_simulation_results <- function(
       combo = combo,
       num_out = num_out,
       seeds = seeds,
-      extra_metadata = list(
-        n_real = combo$n_real,
-        p_real = combo$p_real,
-        d = combo$d,
-        h_ratio = combo$h_ratio,
-        thresh = combo$thresh,
-        num_out = num_out
-      )
+      extra_metadata = metadata
     )
   }, character(1), USE.NAMES = TRUE)
   saved_paths
@@ -637,6 +715,12 @@ resolve_spec <- function(spec, combo) {
   } else {
     spec
   }
+  metrics <- lapply(sim_results, function(res) {
+    df <- res$evaluations
+    df$seed <- res$seed
+    df
+  })
+  do.call(rbind, metrics)
 }
 
 #' Collapse node-wise contamination counts to a single scalar for naming.
@@ -681,7 +765,6 @@ emit_plotting_summary <- function(
     thresh = sort(unique(thresh_values)),
     seeds = seeds
   )
-  saveRDS(plotting_inputs, file = file.path(scenario_dir, "plotting_inputs.rds"))
   message("[Plotting Inputs] model=", scenario_label,
           " | dir=", scenario_dir,
           " | N=", paste(plotting_inputs$N, collapse = ","),
@@ -789,6 +872,176 @@ run_simulation_grid <- function(
   saved_paths
 }
 
+#' 고정된 그래프에서 노드별 오염을 순차적으로 평가하는 배치 실행기.
+#'
+#' @param sem_seed 그래프 생성을 위한 고정 시드.
+#' @param seeds 데이터/알고리즘 반복을 위한 시드 벡터.
+#' @param n_real 표본 크기.
+#' @param p_real 변수 개수.
+#' @param h_ratios LTS 절삭비 목록.
+#' @param thresh_values LTS 임계값 목록.
+#' @param b 각 노드에서 오염시킬 행 수.
+#' @param contaminated_nodes 실험할 노드 인덱스(미지정 시 1:p_real).
+#' @param common_args `CCLSM_simulation_fun()`에 전달할 공통 인자 리스트.
+#' @param output_root 결과 저장 루트 경로.
+#' @param workers Future 워커 수.
+#' @param plan Future 실행 방식.
+#' @return 노드별로 저장된 파일 경로 목록.
+run_nodewise_contamination_batch <- function(
+    sem_seed,
+    seeds,
+    n_real,
+    p_real,
+    h_ratios,
+    thresh_values,
+    b,
+    contaminated_nodes = NULL,
+    common_args,
+    output_root,
+    workers = future::availableCores(),
+    plan = c("multisession", "multicore", "sequential")) {
+  plan <- match.arg(plan)
+  if (is.null(contaminated_nodes)) {
+    contaminated_nodes <- seq_len(p_real)
+  }
+
+  d_val <- common_args$d
+  if (is.null(d_val)) {
+    stop("common_args$d must be supplied")
+  }
+  var_min <- common_args$var_Min %||% 1
+  var_max <- common_args$var_Max %||% 1
+  dist_choice <- common_args$dist %||% "Gaussian"
+  beta_min <- common_args$beta_min %||% 0.8
+  beta_max <- common_args$beta_max %||% 1.2
+  graph_type <- common_args$graph_type %||% 5
+  overlap_mode <- common_args$overlap_mode %||% "independent"
+  overlap_fraction <- common_args$overlap_fraction %||% 0
+  ensure_disjoint <- common_args$ensure_disjoint_rest %||% TRUE
+  out_mean_val <- common_args$out_mean %||% 1e3
+  out_scale_val <- common_args$out_scale %||% 1
+
+  base_generator <- CCLSM_generator(
+    n = n_real,
+    p = p_real,
+    d = d_val,
+    b = 0,
+    outlier_nodes = NULL,
+    var_Min = var_min,
+    var_Max = var_max,
+    dist = dist_choice,
+    beta_min = beta_min,
+    beta_max = beta_max,
+    graph_type = graph_type,
+    seed = sem_seed,
+    overlap_mode = overlap_mode,
+    overlap_fraction = overlap_fraction,
+    ensure_disjoint_rest = ensure_disjoint,
+    out_mean = out_mean_val,
+    out_scale = out_scale_val
+  )
+  fixed_graph <- base_generator$true_Matrix
+
+  common_args_expanded <- modifyList(common_args, list(
+    d = d_val,
+    var_Min = var_min,
+    var_Max = var_max,
+    dist = dist_choice,
+    beta_min = beta_min,
+    beta_max = beta_max,
+    graph_type = graph_type,
+    overlap_mode = overlap_mode,
+    overlap_fraction = overlap_fraction,
+    ensure_disjoint_rest = ensure_disjoint,
+    out_mean = out_mean_val,
+    out_scale = out_scale_val
+  ))
+
+  combos <- expand.grid(
+    h_ratio = h_ratios,
+    thresh = thresh_values,
+    stringsAsFactors = FALSE
+  )
+  combos$n_real <- n_real
+  combos$p_real <- p_real
+  combos$d <- common_args$d
+
+  dir.create(output_root, recursive = TRUE, showWarnings = FALSE)
+  node_results <- list()
+
+  for (node in contaminated_nodes) {
+    node_label <- sprintf("Node%d", node)
+    node_dir <- file.path(output_root, node_label)
+    dir.create(node_dir, recursive = TRUE, showWarnings = FALSE)
+
+    node_meta <- summarise_contamination_nodes(fixed_graph, node)
+    node_detail <- if (length(node_meta) > 0) {
+      node_meta[[1]]
+    } else {
+      list(node = node, Pa_j = integer(0), ancestor_union = node)
+    }
+    num_out_value <- if (length(b) == 1) {
+      b
+    } else {
+      idx <- which(contaminated_nodes == node)
+      if (length(idx) == 0) b[[1]] else b[[idx[1]]]
+    }
+
+    scenario_paths <- list()
+    for (idx in seq_len(nrow(combos))) {
+      combo_row <- combos[idx, ]
+      sim_args <- modifyList(common_args_expanded, list(
+        n_real = n_real,
+        p_real = p_real,
+        h_ratio = combo_row$h_ratio,
+        thresh = combo_row$thresh,
+        outlier_nodes = node,
+        b = num_out_value,
+        fixed_graph = fixed_graph
+      ))
+
+      sim_results <- run_parallel_CCLSM(
+        seeds = seeds,
+        workers = workers,
+        plan = plan,
+        sim_args = sim_args
+      )
+
+      combo_list <- as.list(combo_row)
+      saved <- persist_simulation_results(
+        sim_results = sim_results,
+        output_dir = node_dir,
+        combo = combo_list,
+        num_out = num_out_value,
+        seeds = seeds,
+        metric_names = evaluation_metric_names,
+        extra_metadata = list(
+          sem_seed = sem_seed,
+          contaminated_node = node,
+          Pa_j = node_detail$Pa_j,
+          ancestor_union = node_detail$ancestor_union
+        )
+      )
+      scenario_paths[[paste0("h", combo_row$h_ratio, "_t", combo_row$thresh)]] <- saved
+    }
+
+    emit_plotting_summary(
+      scenario_label = node_label,
+      scenario_dir = node_dir,
+      combos = combos,
+      d = common_args$d,
+      num_out_values = rep(num_out_value, nrow(combos)),
+      seeds = seeds,
+      h_ratios = h_ratios,
+      thresh_values = thresh_values
+    )
+
+    node_results[[node_label]] <- scenario_paths
+  }
+
+  node_results
+}
+
 #########################
 #### Batch Simulation ####
 #########################
@@ -831,6 +1084,23 @@ batch_scenarios <- list(
   )
 )
 
+# Fraction-overlap scenarios contaminate every node with a shared `b` while
+# varying the overlap fraction. Scenario labels encode the percentage so the
+# resulting folders remain Plotting_LTS friendly (e.g. `OutlierAll_fraction100`).
+fraction_overlap_values <- c(1, 0.75, 0.5, 0.25, 0)
+fraction_b_value <- 1
+fraction_scenarios <- lapply(fraction_overlap_values, function(frac) {
+  list(
+    label = sprintf("OutlierAll_fraction%03d", as.integer(round(frac * 100))),
+    b = fraction_b_value,
+    outlier_nodes = function(p) seq_len(p),
+    sim_args = list(
+      overlap_mode = "fraction",
+      overlap_fraction = frac
+    )
+  )
+})
+
 # Toggle to launch the batch run when sourcing the script.
 run_batch_now <- FALSE
 if (isTRUE(run_batch_now)) {
@@ -844,6 +1114,53 @@ if (isTRUE(run_batch_now)) {
     scenarios = batch_scenarios,
     common_args = batch_common_args,
     output_root = batch_output_root,
+    workers = future::availableCores(),
+    plan = "multisession"
+  )
+}
+
+# Toggle for the fraction-overlap scenarios that contaminate every node using
+# the same `b` value while sweeping overlap fractions.
+run_fraction_batch_now <- FALSE
+if (isTRUE(run_fraction_batch_now)) {
+  dir.create(batch_output_root, recursive = TRUE, showWarnings = FALSE)
+  fraction_batch_results <- run_simulation_grid(
+    seeds = batch_seeds,
+    n_values = batch_n_values,
+    p_values = batch_p_values,
+    h_ratios = batch_h_ratios,
+    thresh_values = batch_thresh_values,
+    scenarios = fraction_scenarios,
+    common_args = batch_common_args,
+    output_root = batch_output_root,
+    workers = future::availableCores(),
+    plan = "multisession"
+  )
+}
+
+# 노드별 오염 시나리오 설정.
+nodewise_sem_seed <- 777
+nodewise_n <- 100
+nodewise_p <- 20
+nodewise_b <- 1
+nodewise_nodes <- NULL  # NULL이면 1:nodewise_p 전체를 탐색한다.
+nodewise_h_ratios <- batch_h_ratios
+nodewise_thresh_values <- batch_thresh_values
+nodewise_output_root <- file.path(batch_output_root, "Nodewise")
+run_nodewise_now <- FALSE
+if (isTRUE(run_nodewise_now)) {
+  dir.create(nodewise_output_root, recursive = TRUE, showWarnings = FALSE)
+  nodewise_results <- run_nodewise_contamination_batch(
+    sem_seed = nodewise_sem_seed,
+    seeds = batch_seeds,
+    n_real = nodewise_n,
+    p_real = nodewise_p,
+    h_ratios = nodewise_h_ratios,
+    thresh_values = nodewise_thresh_values,
+    b = nodewise_b,
+    contaminated_nodes = nodewise_nodes,
+    common_args = batch_common_args,
+    output_root = nodewise_output_root,
     workers = future::availableCores(),
     plan = "multisession"
   )
