@@ -1,21 +1,78 @@
 
 ########## packages #########
-if(!require(ggplot2)){
-  install.packages("ggplot2")
-  library(ggplot2)
+#' Attempt to load an optional dependency without installing it.
+#'
+#' @param package Package name as a string.
+#' @param attach Whether to call `library()` when the package is available.
+load_optional_package <- function(package, attach = TRUE) {
+  if (requireNamespace(package, quietly = TRUE)) {
+    if (attach) {
+      library(package, character.only = TRUE)
+    }
+    TRUE
+  } else {
+    warning(sprintf("Package '%s' is not available. Related functionality may be skipped.", package))
+    FALSE
+  }
 }
 
-if(!require(gridExtra)){
-  install.packages("gridExtra")
-  library(gridExtra)
+load_optional_package("ggplot2")
+load_optional_package("gridExtra")
+
+################# Metric definitions ###############
+evaluation_metric_names <- c(
+  "precisition", "recall", "precisition_edge", "recall_edge",
+  "true_positives", "true_negatives", "false_positives", "false_negatives",
+  "true_positives_edge", "true_negatives_edge", "false_positives_edge", "false_negatives_edge",
+  "hamming_dist", "hamming_dist_edge", "hamming_dist_ordering",
+  "true_graph_total_edges", "estimated_graph_total_edges"
+)
+
+metric_key_from_index <- function(r_index) {
+  switch(as.character(r_index),
+         "1" = "DAG",
+         "2" = "MEC",
+         "3" = "Oracle",
+         stop("r_index must be 1 (DAG), 2 (MEC), or 3 (Oracle)"))
+}
+
+extract_metric_matrix <- function(records, metric_key) {
+  if (length(records) == 0) {
+    return(matrix(numeric(0), nrow = length(evaluation_metric_names), ncol = 0))
+  }
+  do.call(cbind, lapply(records, function(rec) {
+    values <- rec[[metric_key]]
+    if (is.null(values)) {
+      rep(NA_real_, length(evaluation_metric_names))
+    } else {
+      as.numeric(values)
+    }
+  }))
+}
+
+############## Result directory helpers #############
+default_result_root <- file.path("D:/2022LTS_GSEM", "Result")
+if (!exists("result_root", inherits = FALSE)) {
+  if (dir.exists(default_result_root)) {
+    result_root <- default_result_root
+  } else if (interactive() && requireNamespace("rstudioapi", quietly = TRUE)) {
+    ctx <- tryCatch(rstudioapi::getActiveDocumentContext(), error = function(e) NULL)
+    if (!is.null(ctx) && !is.null(ctx$path) && nzchar(ctx$path)) {
+      result_root <- dirname(ctx$path)
+    } else {
+      result_root <- getwd()
+    }
+  } else {
+    result_root <- getwd()
+  }
 }
 
 ################# simulation_data_fun ###############
-simulation_data_fun = function(N, P, d = 1, method, r_index = 1, num_out = 0, h_ratio = 1, thresh = 2 ){
+simulation_data_fun = function(N, P, d = 1, method, r_index = 1, num_out = 0, h_ratio = 1, thresh = 2, result_dir = getwd() ){
   result_precision = result_recall = result_hamming = result_implementations = NULL
   result_precision_byP = result_recall_byP = result_implementations_byP = NULL
   graph_N = rep(0, length(N))
-  MRS_N = MRS_N_SE = MRS_N_implementation = matrix(0, nrow = length(N), ncol = 17)
+  MRS_N = MRS_N_SE = matrix(0, nrow = length(N), ncol = length(evaluation_metric_names))
   MRS_N_implementation = matrix(0, nrow = length(N), ncol = 1)
   tryCatch({
     for(p_index in 1:length(P)){
@@ -28,11 +85,12 @@ simulation_data_fun = function(N, P, d = 1, method, r_index = 1, num_out = 0, h_
         # HSLM_p
         if(method =="GDS") DAGresult_filename = paste0("GDS_p",p_real,"_n",n_real,"_d",d,"_b",num_out,"_result.Rdata")
         if(method =="TD") DAGresult_filename = paste0("TD_p",p_real,"_n",n_real,"_d",d,"_b",num_out,"_result.Rdata")
-        MRS_out = data.loading.fun(DAGresult_filename, r_index)
+        full_path = file.path(result_dir, DAGresult_filename)
+        MRS_out = data.loading.fun(full_path, r_index)
         MRS_N[n_index, ] = MRS_out$mean_output
         MRS_N_SE[n_index, ] = MRS_out$se_output
         MRS_N_implementation[n_index, ] = MRS_out$number_of_implementation
-        graph_N[n_index] = data.loading.fun.ham(DAGresult_filename, r_index = 1)
+        graph_N[n_index] = data.loading.fun.ham(full_path, r_index = 1)
       }
       result_precision_byP =  data.frame(x= N,y = MRS_N[,1], SE = MRS_N_SE[,1],
                                          Algorithm = rep( paste0(method),length(N) ) )
@@ -57,47 +115,61 @@ simulation_data_fun = function(N, P, d = 1, method, r_index = 1, num_out = 0, h_
 ################# data.loading.fun ###############
 data.loading.fun = function(DAGresult_filename, r_index = 1){
 
+  if (!file.exists(DAGresult_filename)) {
+    stop(sprintf("Result file '%s' not found", DAGresult_filename))
+  }
   load(DAGresult_filename)
 
-  result_N = result_N_SE = matrix(0, length(N), 17)
-  time_N = time_N_SE = matrix(0, length(N), 1)
-  result_precision = result_recall = result_time = NULL
-  mean_output = se_output = number_of_implementation = NA
-  simulation_result = NULL
-
-  length(evaluation_result)
-
-  for(i in 1:length(evaluation_result)){
-    if( is.numeric(evaluation_result[[i]][[1]]) ){
-      simulation_result = cbind(simulation_result, evaluation_result[[i]][[r_index]])
-    }
+  if (!exists("evaluation_result")) {
+    stop("evaluation_result object not found in Rdata file")
   }
-  if(!is.null(simulation_result)){
-    mean_output  = rowMeans( (simulation_result), na.rm = T )
-    se_output  = apply( (simulation_result), 1, sd, na.rm = T)/sqrt(ncol(simulation_result))
-    number_of_implementation = ncol(simulation_result)
+
+  metric_key <- metric_key_from_index(r_index)
+  metric_matrix <- extract_metric_matrix(evaluation_result, metric_key)
+
+  if (!is.null(metric_matrix) && length(metric_matrix) > 0) {
+    mean_output  = rowMeans(metric_matrix, na.rm = TRUE)
+    se_output  = apply(metric_matrix, 1, sd, na.rm = TRUE)/sqrt(ncol(metric_matrix))
+    number_of_implementation = ncol(metric_matrix)
+  } else {
+    mean_output = rep(NA_real_, length(evaluation_metric_names))
+    se_output = rep(NA_real_, length(evaluation_metric_names))
+    number_of_implementation = 0
   }
+
   return( list(mean_output = mean_output, se_output = se_output, number_of_implementation = number_of_implementation) )
 }
 
 ################# data.loading.fun ###############
 data.loading.fun.ham = function(DAGresult_filename, r_index = 1){
-  
-  load(DAGresult_filename)
-  
-  simulation_result = NULL
-  
-  for(i in 1:length(evaluation_result)){
-    if( is.numeric(evaluation_result[[i]][[1]]) ){
-      simulation_result = cbind(simulation_result, evaluation_result[[i]][[r_index]][13])
-    }
+
+  if (!file.exists(DAGresult_filename)) {
+    stop(sprintf("Result file '%s' not found", DAGresult_filename))
   }
-  return( sum( simulation_result == 0 ) )
+  load(DAGresult_filename)
+
+  if (!exists("evaluation_result")) {
+    stop("evaluation_result object not found in Rdata file")
+  }
+
+  metric_key <- metric_key_from_index(r_index)
+  metric_matrix <- extract_metric_matrix(evaluation_result, metric_key)
+  if (is.null(metric_matrix) || ncol(metric_matrix) == 0) {
+    return(0)
+  }
+  hamming_values <- metric_matrix[13, , drop = TRUE]
+  sum(hamming_values == 0, na.rm = TRUE)
 }
 
 ############## Complete Result #################
-setwd("D:/2022LTS_GSEM/Result/Outlier1") 
-setwd("D:/2022LTS_GSEM/Result/OutlierAll")
+# Select the scenario folder containing the `.Rdata` files saved by the
+# simulation script. Adjust `current_model` as needed (e.g. "OutlierAll",
+# "OutlierAll_fraction100").
+current_model = "Outlier1"
+result_directory = file.path(result_root, current_model)
+if (!dir.exists(result_directory)) {
+  stop(sprintf("Result directory '%s' not found.", result_directory))
+}
 
 N = seq(50, 500, by = 50)
 #N = c(200, 500, 1000)
@@ -111,14 +183,14 @@ num_out = 1
 ################### plotting ############
 result1 = result2 = result3 = result4 = result5 = result6 = result7 = NULL
   #result1 = simulation_data_fun(N, P, d, "HGSM", j)[[r_index]]
-  result1 = simulation_data_fun(N, P, d = 1, "LTS", j, num_out = num_out, h_ratio = 0.5, thresh = 2)[[r_index]]
-  result2 = simulation_data_fun(N, P, d = 1, "LTS", j, num_out = num_out, h_ratio = 0.7, thresh = 2)[[r_index]]
-  result3 = simulation_data_fun(N, P, d = 1, "LTS", j, num_out = num_out, h_ratio = 0.9, thresh = 2)[[r_index]]
-  
-  result4 = simulation_data_fun(N, P, d, "USB", j, num_out = num_out)[[r_index]]
-  result5 = simulation_data_fun(N, P, d, "GDS", j, num_out = num_out)[[r_index]]
-  result6 = simulation_data_fun(N, P, d, "HLSM", j, num_out = num_out)[[r_index]]
-  result7 = simulation_data_fun(N, P, d, "TD", j, num_out = num_out)[[r_index]]
+  result1 = simulation_data_fun(N, P, d = 1, "LTS", j, num_out = num_out, h_ratio = 0.5, thresh = 2, result_dir = result_directory)[[r_index]]
+  result2 = simulation_data_fun(N, P, d = 1, "LTS", j, num_out = num_out, h_ratio = 0.7, thresh = 2, result_dir = result_directory)[[r_index]]
+  result3 = simulation_data_fun(N, P, d = 1, "LTS", j, num_out = num_out, h_ratio = 0.9, thresh = 2, result_dir = result_directory)[[r_index]]
+
+  result4 = simulation_data_fun(N, P, d, "USB", j, num_out = num_out, result_dir = result_directory)[[r_index]]
+  result5 = simulation_data_fun(N, P, d, "GDS", j, num_out = num_out, result_dir = result_directory)[[r_index]]
+  result6 = simulation_data_fun(N, P, d, "HLSM", j, num_out = num_out, result_dir = result_directory)[[r_index]]
+  result7 = simulation_data_fun(N, P, d, "TD", j, num_out = num_out, result_dir = result_directory)[[r_index]]
   
   result1[,4] = rep("LTS0.5",length(N))
   result2[,4] = rep("LTS0.7",length(N))
@@ -154,15 +226,22 @@ print(q)
 
 #################################################
 result = cbind( result1[,2], result2[,2],result3[,2], result4[,2], result5[,2])
-library(xtable)
-xtable(result)
+if (load_optional_package("xtable")) {
+  print(xtable(result))
+} else {
+  warning("Package 'xtable' not available; skipping LaTeX table output.")
+}
 
 model = c('OutlierAll', 'Outlier1')
 
 N = seq(50, 500, by = 50)
 ###### plots for comparison of algorihthms ### ####
 for(model in c("OutlierAll")){
-  setwd(paste0("D:/2022LTS_GSEM/Result/",model)) 
+  model_dir = file.path(result_root, model)
+  if (!dir.exists(model_dir)) {
+    warning(sprintf("Result directory '%s' not found; skipping.", model_dir))
+    next
+  }
   for(P in c(20)  ){
     for( d in c(1) ){
       for(num_out in c(1)){
@@ -178,12 +257,12 @@ for(model in c("OutlierAll")){
   
           ################### plotting ############
           result1 = result2 = result3 = result4 = result5 = result6 = result7 = NULL
-          result1 = simulation_data_fun(N, P, d, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 2)[[r_index]]
-          result2 = simulation_data_fun(N, P, d, "HLSM", num_out = num_out)[[r_index]]
-          result3 = simulation_data_fun(N, P, d, "HGSM", num_out = num_out)[[r_index]]
-          result4 = simulation_data_fun(N, P, d, "TD", num_out = num_out)[[r_index]]
-          result5 = simulation_data_fun(N, P, d, "USB", num_out = num_out)[[r_index]]
-          result6 = simulation_data_fun(N, P, d, "GDS", num_out = num_out)[[r_index]]
+            result1 = simulation_data_fun(N, P, d, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 2, result_dir = model_dir)[[r_index]]
+            result2 = simulation_data_fun(N, P, d, "HLSM", num_out = num_out, result_dir = model_dir)[[r_index]]
+            result3 = simulation_data_fun(N, P, d, "HGSM", num_out = num_out, result_dir = model_dir)[[r_index]]
+            result4 = simulation_data_fun(N, P, d, "TD", num_out = num_out, result_dir = model_dir)[[r_index]]
+            result5 = simulation_data_fun(N, P, d, "USB", num_out = num_out, result_dir = model_dir)[[r_index]]
+            result6 = simulation_data_fun(N, P, d, "GDS", num_out = num_out, result_dir = model_dir)[[r_index]]
           result1[,4] = rep("RGSM", length(N))
           result5[,4] = rep("US", length(N))
           result = as.data.frame( rbind( result1, result2, result3, result4, result5, result6) )
@@ -234,7 +313,11 @@ scale_param = TRUE
 scale_param = FALSE
 for(model in c("OutlierAll")){
   for(num_out in c(1)){
-    setwd(paste0("D:/2022LTS_GSEM/Result/",model)) 
+    model_dir = file.path(result_root, model)
+    if (!dir.exists(model_dir)) {
+      warning(sprintf("Result directory '%s' not found; skipping.", model_dir))
+      next
+    }
     if(scale_param){
       plot_filename = paste0("D:/OneDrive - UOS/2023Research/2022GaussianDAG_LTS/report/figures/",model,"D",d,"B",num_out,"C.png")
     }else{
@@ -244,11 +327,11 @@ for(model in c("OutlierAll")){
   
     ################### plotting ############
     result1 = result2 = result3 = result4 = result5 = result6 = result7 = NULL
-    result001 = simulation_data_fun(N, P = 5, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 2)[[5]]/100
-    result002 = simulation_data_fun(N, P = 10, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 2)[[5]]/100
-    result003 = simulation_data_fun(N, P = 15, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 2)[[5]]/100
-    result004 = simulation_data_fun(N, P = 30, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 2)[[5]]/100
-    result005 = simulation_data_fun(N, P = 50, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 2)[[5]]/100
+    result001 = simulation_data_fun(N, P = 5, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 2, result_dir = model_dir)[[5]]/100
+    result002 = simulation_data_fun(N, P = 10, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 2, result_dir = model_dir)[[5]]/100
+    result003 = simulation_data_fun(N, P = 15, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 2, result_dir = model_dir)[[5]]/100
+    result004 = simulation_data_fun(N, P = 30, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 2, result_dir = model_dir)[[5]]/100
+    result005 = simulation_data_fun(N, P = 50, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 2, result_dir = model_dir)[[5]]/100
   
     if( scale_param ){
       result1 = data.frame( x = N2/log(5) , y = result001, SE = 0, Algorithm = rep("P=5",length(N))  )
@@ -306,17 +389,21 @@ scale_param = FALSE
 for(model in c("OutlierAll")){
   for(P in c(20)){
     for(num_out in c(1)){
-    setwd(paste0("D:/2022LTS_GSEM/Result/",model)) 
+    model_dir = file.path(result_root, model)
+    if (!dir.exists(model_dir)) {
+      warning(sprintf("Result directory '%s' not found; skipping.", model_dir))
+      next
+    }
     plot_filename = paste0("D:/OneDrive - UOS/2023Research/2022GaussianDAG_LTS/report/figures/",model,"P",P,"D",d,"B",num_out,"H.png")
     png(plot_filename, width = 450, height = 300)
 
     ################### plotting ############
     result1 = result2 = result3 = result4 = result5 = result6 = result7 = NULL
-    result001 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 2)[[5]]/100
-    result002 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.6, thresh = 2)[[5]]/100
-    result003 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.7, thresh = 2)[[5]]/100
-    result004 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.8, thresh = 2)[[5]]/100
-    result005 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.9, thresh = 2)[[5]]/100
+    result001 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 2, result_dir = model_dir)[[5]]/100
+    result002 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.6, thresh = 2, result_dir = model_dir)[[5]]/100
+    result003 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.7, thresh = 2, result_dir = model_dir)[[5]]/100
+    result004 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.8, thresh = 2, result_dir = model_dir)[[5]]/100
+    result005 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.9, thresh = 2, result_dir = model_dir)[[5]]/100
     
     if( scale_param ){
       result1 = data.frame( x = N*0.5, y = result001, SE = 0, Algorithm = rep("alpha=0.5",length(N))  )
@@ -375,8 +462,12 @@ scale_param = FALSE
 for(model in c("OutlierAll")){
   for(P in c(20)){
     for(num_out in c(1)){
-      setwd(paste0("D:/2022LTS_GSEM/Result/",model)) 
-      
+      model_dir = file.path(result_root, model)
+      if (!dir.exists(model_dir)) {
+        warning(sprintf("Result directory '%s' not found; skipping.", model_dir))
+        next
+      }
+
       if(scale_param){
         plot_filename = paste0("D:/OneDrive - UOS/2023Research/2022GaussianDAG_LTS/report/figures/",model,"P",P,"D",d,"B",num_out,"EtaC.png")
       }else{
@@ -388,11 +479,11 @@ for(model in c("OutlierAll")){
       
       ################### plotting ############
       result1 = result2 = result3 = result4 = result5 = result6 = result7 = NULL
-      result001 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 1)[[5]]/100
-      result002 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 1.5)[[5]]/100
-      result003 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 2)[[5]]/100
-      result004 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 3)[[5]]/100
-      result005 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 1000)[[5]]/100
+      result001 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 1, result_dir = model_dir)[[5]]/100
+      result002 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 1.5, result_dir = model_dir)[[5]]/100
+      result003 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 2, result_dir = model_dir)[[5]]/100
+      result004 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 3, result_dir = model_dir)[[5]]/100
+      result005 = simulation_data_fun(N, P, d = 1, "LTS", num_out = num_out, h_ratio = 0.5, thresh = 1000, result_dir = model_dir)[[5]]/100
     
       if( scale_param ){ # variance를 몰라서...
         result1 = data.frame( x = (N2- num_out) /pnorm(1) , y = result001, SE = 0, Algorithm = rep("eta=1.0",length(N))  )
@@ -451,7 +542,11 @@ N = seq(50, 500, by = 50); d = 1
 scale_param = F
 for(model in c("Outlier1")){
   for(P in c(20)){
-    setwd(paste0("D:/2022LTS_GSEM/Result/",model)) 
+    model_dir = file.path(result_root, model)
+    if (!dir.exists(model_dir)) {
+      warning(sprintf("Result directory '%s' not found; skipping.", model_dir))
+      next
+    }
     if(scale_param){
       plot_filename = paste0("D:/OneDrive - UOS/2023Research/2022GaussianDAG_LTS/report/figures/",model,"P",P,"D",d,"BC.png")
     }else{
@@ -462,11 +557,11 @@ for(model in c("Outlier1")){
     
     ################### plotting ############
     result1 = result2 = result3 = result4 = result5 = result6 = result7 = NULL
-    result001 = simulation_data_fun(N, P, d = 1, "LTS", num_out = 30, h_ratio = 0.5, thresh = 2)[[5]]/100
-    result002 = simulation_data_fun(N, P, d = 1, "LTS", num_out = 60, h_ratio = 0.5, thresh = 2)[[5]]/100
-    result003 = simulation_data_fun(N, P, d = 1, "LTS", num_out = 90, h_ratio = 0.5, thresh = 2)[[5]]/100
-    result004 = simulation_data_fun(N, P, d = 1, "LTS", num_out = 120, h_ratio = 0.5, thresh = 2)[[5]]/100
-    result005 = simulation_data_fun(N, P, d = 1, "LTS", num_out = 150, h_ratio = 0.5, thresh = 2)[[5]]/100
+    result001 = simulation_data_fun(N, P, d = 1, "LTS", num_out = 30, h_ratio = 0.5, thresh = 2, result_dir = model_dir)[[5]]/100
+    result002 = simulation_data_fun(N, P, d = 1, "LTS", num_out = 60, h_ratio = 0.5, thresh = 2, result_dir = model_dir)[[5]]/100
+    result003 = simulation_data_fun(N, P, d = 1, "LTS", num_out = 90, h_ratio = 0.5, thresh = 2, result_dir = model_dir)[[5]]/100
+    result004 = simulation_data_fun(N, P, d = 1, "LTS", num_out = 120, h_ratio = 0.5, thresh = 2, result_dir = model_dir)[[5]]/100
+    result005 = simulation_data_fun(N, P, d = 1, "LTS", num_out = 150, h_ratio = 0.5, thresh = 2, result_dir = model_dir)[[5]]/100
     
     if( scale_param ){
       result1 = data.frame( x = N/30, y = result001, SE = 0, Algorithm = rep("|B|=30",length(N))  )
