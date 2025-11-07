@@ -59,7 +59,6 @@ load_optional_package("RBGL")
 load_optional_package("graph")
 
 ############# 공통 유틸리티 함수 #############
-
 #' 알고리즘 수행 결과에서 평가 지표 한 행을 생성한다.
 build_metric_row <- function(name, result) {
   metrics <- setNames(rep(NA_real_, length(evaluation_metric_names)), evaluation_metric_names)
@@ -155,7 +154,7 @@ CCLSM_simulation_fun <- function(
     gsem_direction = "backward",
     gsem_alpha = NULL,
     gsem_max_degree = d,
-    gds_startAt = "emptyGraph",
+    gds_startAt = "randomGraph",
     save_data = FALSE,
     generator_output = NULL,
     fixed_graph = NULL
@@ -391,7 +390,7 @@ run_parallel_CCLSM <- function(
 # 데이터 생성 및 단일 시뮬레이션 예제 -----------------------------------------
 
 #### Simulation Settings for Toy Example #####
-p <- 20
+p <- 5
 n <- 50
 d <- 1
 seed <- sample(1:100, 1)
@@ -400,7 +399,7 @@ beta_max <- 1.00
 graph_type <- 5
 alpha <- max(c(1 - pnorm(n^(1/3) / 2), 0))
 
-outlier_node <- 1
+outlier_node <- 3
 b <- 1
 synthetic_data <- CCLSM_generator(
   n = n,
@@ -430,6 +429,10 @@ boxplot(toy_data)
 barplot(sapply(toy_data, mean))
 barplot(sapply(toy_data, var))
 
+GDS_Algorithm(toy_data,scoreName = "SEMSEV", pars = list(regr.pars = list()), 
+    check = "checkUntilFirstMinK", output = FALSE, startAt = "randomGraph", graph=graph)
+evaluation_fun(graph, GDS(toy_data,scoreName = "SEMSEV", pars = list(regr.pars = list()), 
+    check = "checkUntilFirstMinK", output = FALSE, startAt = "emptyGraph")$Adj)
 ####### 단일 함수 기반 파이프라인 테스트 ########
 toy_simulation <- CCLSM_simulation_fun(
   seed = seed,
@@ -608,29 +611,6 @@ construct_output_filename <- function(prefix, combo, num_out) {
       num_out
     )
   }
-
-  progressr::handlers(global = TRUE, progressr::handler_progress(format = progress_format))
-  start_time <- Sys.time()
-
-  progressr::with_progress({
-    p <- progressr::progressor(steps = total_steps)
-    future.apply::future_lapply(seq_along(seeds), function(idx) {
-      seed <- seeds[idx]
-      args <- modifyList(sim_args, list(seed = seed))
-      res <- do.call(CCLSM_simulation_fun, args)
-      elapsed_sec <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
-      remaining_est <- max(total_steps - idx, 0)
-      eta_sec <- if (idx > 0) (elapsed_sec / idx) * remaining_est else NA_real_
-      msg <- sprintf(
-        "seed %d | elapsed %s | eta %s",
-        seed,
-        format_duration(elapsed_sec),
-        format_duration(eta_sec)
-      )
-      p(message = msg)
-      res
-    }, future.seed = TRUE)
-  })
 }
 
 #' Persist algorithm-specific results to disk.
@@ -708,20 +688,20 @@ persist_simulation_results <- function(
   saved_paths
 }
 
-#' Resolve scenario-specific values that may depend on the number of nodes.
+#' 시나리오 사양(spec)을 실제 값으로 해석해 반환
+#'
+#' @param spec 스칼라(그대로 사용) 또는 함수(p를 받아 값 반환).
+#' @param combo data.frame의 한 행과 유사한 리스트(여기서 p_real 사용).
+#' @return 해석된 값(스칼라 또는 벡터).
 resolve_spec <- function(spec, combo) {
+  # spec이 함수라면 p(= combo$p_real)를 넣어 계산
   if (is.function(spec)) {
-    spec(combo$p_real)
-  } else {
-    spec
+    return(spec(combo$p_real))
   }
-  metrics <- lapply(sim_results, function(res) {
-    df <- res$evaluations
-    df$seed <- res$seed
-    df
-  })
-  do.call(rbind, metrics)
+  # 함수가 아니면 있는 그대로 반환
+  return(spec)
 }
+
 
 #' Collapse node-wise contamination counts to a single scalar for naming.
 collapse_num_out <- function(values) {
@@ -1047,7 +1027,7 @@ run_nodewise_contamination_batch <- function(
 #########################
 
 # Default output root aligns with Plotting_LTS expectations.
-batch_output_root <- file.path(default_project_root, "Result")
+batch_output_root <-file.path(default_project_root, "Result")
 
 # Common parameters shared across all batch jobs. Adjust as needed.
 batch_common_args <- list(
@@ -1064,11 +1044,11 @@ batch_common_args <- list(
 )
 
 # Parameter grids for batch execution.
-batch_seeds <- 1:10
-batch_n_values <- c(50, 100, 150, 200)
+batch_seeds <- 1:2
+batch_n_values <- c(50, 100)
 batch_p_values <- c(20)
 batch_h_ratios <- c(0.5, 0.7, 0.9)
-batch_thresh_values <- c(2, 10)
+batch_thresh_values <- c(2)
 
 # Contamination scenarios mirror the plotting folders (Outlier1 / OutlierAll).
 batch_scenarios <- list(
@@ -1087,7 +1067,7 @@ batch_scenarios <- list(
 # Fraction-overlap scenarios contaminate every node with a shared `b` while
 # varying the overlap fraction. Scenario labels encode the percentage so the
 # resulting folders remain Plotting_LTS friendly (e.g. `OutlierAll_fraction100`).
-fraction_overlap_values <- c(1, 0.75, 0.5, 0.25, 0)
+fraction_overlap_values <- c(0.5)
 fraction_b_value <- 1
 fraction_scenarios <- lapply(fraction_overlap_values, function(frac) {
   list(
@@ -1102,7 +1082,7 @@ fraction_scenarios <- lapply(fraction_overlap_values, function(frac) {
 })
 
 # Toggle to launch the batch run when sourcing the script.
-run_batch_now <- FALSE
+run_batch_now <- TRUE
 if (isTRUE(run_batch_now)) {
   dir.create(batch_output_root, recursive = TRUE, showWarnings = FALSE)
   batch_results <- run_simulation_grid(
